@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/tools/doc-sync/hook.sh\" --event stop",
+            "timeout": 30,
+            "statusMessage": "Checking documentation sync..."
+          }
+        ]
+      }
+    ]
+  }
+}

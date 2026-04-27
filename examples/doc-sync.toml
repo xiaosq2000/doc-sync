@@ -1,0 +1,9 @@
+version = 2
+
+[[watch]]
+docs = ["README.md", "docs/architecture.md"]
+paths = ["src/", "pyproject.toml"]
+
+[[watch]]
+docs = ["docs/index.md"]
+paths = ["**/*.md"]
