@@ -11,7 +11,7 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 STATE_FILENAME = ".doc-sync-state.json"
@@ -167,12 +167,118 @@ def _validate_string_list(
             raise ConfigError(
                 f"{config_path}: `[[watch]]` #{watch_index} `{key}` item #{item_index} must be a non-empty string",
             )
-        if item.startswith("/"):
-            raise ConfigError(
-                f"{config_path}: `[[watch]]` #{watch_index} `{key}` item #{item_index} must be repo-relative",
-            )
-        strings.append(_normalize_path(item, keep_trailing_slash=item.endswith("/")))
+        normalized = _normalize_path(item, keep_trailing_slash=item.endswith("/"))
+        location = (
+            f"{config_path}: `[[watch]]` #{watch_index} `{key}` item #{item_index}"
+        )
+        _validate_relative_config_path(location, item, normalized)
+        strings.append(normalized)
     return strings
+
+
+def _validate_relative_config_path(
+    location: str,
+    raw_item: str,
+    normalized: str,
+) -> None:
+    if (
+        raw_item.startswith("/")
+        or normalized.startswith("/")
+        or PureWindowsPath(raw_item).is_absolute()
+    ):
+        raise ConfigError(f"{location} must be repo-relative")
+
+    normalized_without_slash = normalized.rstrip("/")
+    if not normalized_without_slash:
+        raise ConfigError(f"{location} must not normalize to an empty path")
+
+    if any(segment in {".", ".."} for segment in normalized_without_slash.split("/")):
+        raise ConfigError(f"{location} must not contain `.` or `..` segments")
+
+
+def lint_config_paths(*, root: Path, config_path: Path) -> None:
+    """Validate that every configured doc-sync path resolves in the repository."""
+    watches = _load_config(config_path)
+    if watches is None:
+        raise ConfigError(f"{config_path}: config file does not exist")
+
+    root = root.resolve()
+    repo_file_paths = _repo_file_paths(root)
+    errors: list[str] = []
+    for watch_index, watch in enumerate(watches, start=1):
+        for item_index, pattern in enumerate(watch.paths, start=1):
+            location = (
+                f"`[[watch]]` #{watch_index} `paths` item #{item_index} `{pattern}`"
+            )
+            error = _lint_path_entry(
+                root,
+                repo_file_paths,
+                location,
+                "paths",
+                pattern,
+            )
+            if error:
+                errors.append(error)
+        for item_index, doc in enumerate(watch.docs, start=1):
+            location = f"`[[watch]]` #{watch_index} `docs` item #{item_index} `{doc}`"
+            error = _lint_path_entry(
+                root,
+                repo_file_paths,
+                location,
+                "docs",
+                doc,
+            )
+            if error:
+                errors.append(error)
+
+    if errors:
+        detail = "\n".join(f"  - {error}" for error in errors)
+        raise ConfigError(f"{config_path}: invalid configured paths:\n{detail}")
+
+
+def _repo_file_paths(root: Path) -> tuple[str, ...]:
+    git_paths = _run_git(
+        root, ["ls-files", "--cached", "--others", "--exclude-standard"]
+    )
+    if git_paths:
+        normalized_paths = {_normalize_path(path) for path in git_paths}
+        return tuple(
+            sorted(path for path in normalized_paths if (root / path).is_file()),
+        )
+
+    return tuple(
+        sorted(
+            _normalize_path(str(path.relative_to(root)))
+            for path in root.rglob("*")
+            if path.is_file()
+        ),
+    )
+
+
+def _lint_path_entry(
+    root: Path,
+    repo_file_paths: tuple[str, ...],
+    location: str,
+    key: str,
+    value: str,
+) -> str | None:
+    error: str | None = None
+    if key == "docs":
+        if value.endswith("/") or _has_glob(value):
+            error = f"{location} must be an exact documentation file path"
+        elif not (root / value).is_file():
+            error = f"{location} does not point to an existing file"
+    elif value.endswith("/"):
+        if _has_glob(value.rstrip("/")):
+            error = f"{location} must not combine glob syntax with trailing `/` directory matching"
+        elif not (root / value.rstrip("/")).is_dir():
+            error = f"{location} does not point to an existing directory"
+    elif _has_glob(value):
+        if not any(match_path(value, path) for path in repo_file_paths):
+            error = f"{location} glob does not match any tracked or untracked file"
+    elif not (root / value).is_file():
+        error = f"{location} does not point to an existing file"
+    return error
 
 
 def _run_git(root: Path, args: list[str]) -> list[str]:
@@ -392,6 +498,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Read changed file paths from stdin instead of git.",
     )
+    parser.add_argument(
+        "--lint-config",
+        action="store_true",
+        help="Validate that configured paths exist, then exit.",
+    )
     return parser.parse_args()
 
 
@@ -401,6 +512,14 @@ def main() -> None:
     root = _resolve_root(args.root)
     config_path = _resolve_path(root, args.config)
     state_path = _resolve_path(root, args.state)
+
+    if args.lint_config:
+        try:
+            lint_config_paths(root=root, config_path=config_path)
+        except ConfigError as exc:
+            sys.stderr.write(f"doc-sync config error: {exc}\n")
+            sys.exit(1)
+        sys.exit(0)
 
     changed_files = (
         tuple(line.strip() for line in sys.stdin.read().splitlines() if line.strip())

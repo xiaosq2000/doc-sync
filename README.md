@@ -57,6 +57,26 @@ Useful lower-level form:
 python3 tools/doc-sync/doc_sync.py --root . --config doc-sync.toml
 ```
 
+## Config Lint
+
+Validate that `doc-sync.toml` points at real repository paths with:
+
+```bash
+python3 tools/doc-sync/doc_sync.py --root . --config doc-sync.toml --lint-config
+```
+
+The linter checks the TOML shape plus path resolution:
+
+- `paths` entries are existing exact files, existing trailing-slash directories,
+  or globs that match at least one tracked or untracked non-ignored file.
+- `docs` entries are existing exact files because doc-sync compares them against
+  changed file paths.
+- Absolute paths, empty normalized paths, and `.` or `..` path segments are
+  rejected.
+
+Repositories can wire this through pre-commit so stale mappings are caught when
+files are renamed or deleted.
+
 ## Config
 
 Project-specific mappings live outside this package, usually at repo root as
