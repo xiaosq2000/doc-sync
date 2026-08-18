@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/shuqixiao/doc-sync/main/schemas/doc-sync.schema.json",
+  "title": "doc-sync configuration",
+  "description": "Maps changed repository sources to documents that require review.",
+  "type": "object",
+  "required": ["config_version", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "config_version": {
+      "description": "Configuration schema version.",
+      "const": 1
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "sources", "documents"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Stable identifier used in diagnostics and state.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "sources": {
+            "description": "Repository-relative exact paths, directory prefixes, or glob patterns.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/relativePath"
+            }
+          },
+          "documents": {
+            "description": "Repository-relative exact documentation file paths.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "allOf": [
+                { "$ref": "#/$defs/relativePath" },
+                {
+                  "not": {
+                    "pattern": "[?*\\[]|/$"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.{1,2}(?:/|$)).+"
+    }
+  }
+}

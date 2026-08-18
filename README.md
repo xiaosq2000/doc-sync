@@ -1,164 +1,189 @@
 # Doc-Sync
 
-Doc-sync is a small, portable session-end hook for AI-assisted repositories. It
-checks changed files against a repo-local ownership map and injects a focused
-documentation-review prompt only when mapped docs may need attention.
+Doc-sync maps changed source files to documentation that should be reviewed. It
+is a deterministic Git-based guard for agent-assisted repositories: it does not
+generate documentation, inspect prose quality, or claim that two files are
+semantically synchronized.
 
-It is a hook, not an agent skill. The result is deterministic, cheap, and based
-on git state instead of model discretion.
+The same rule engine supports manual checks, pre-commit validation, Claude Code
+`Stop` hooks, and OpenCode `session.idle` plugins.
 
-## Quick Start
+> Doc-sync is intentionally not published to PyPI yet. Install it manually from
+> a source checkout using the [installation guide](docs/installation.md).
 
-Copy `tools/doc-sync/` into a repository, then install one or both integrations:
+## Requirements
 
-```bash
-python3 tools/doc-sync/install.py --claude
-python3 tools/doc-sync/install.py --opencode
-python3 tools/doc-sync/install.py --all
-```
+- Python 3.11 or newer
+- Git
+- No Python runtime dependencies
 
-Preview changes first with:
+## Installation
 
-```bash
-python3 tools/doc-sync/install.py --all --dry-run
-```
+Use an isolated application environment when possible. The
+[installation guide](docs/installation.md) covers `uv`, `pipx`, virtual
+environments, running without installation, upgrades,
+[uninstallation](docs/installation.md#uninstall), and PATH troubleshooting.
 
-The installer is conservative:
+## Quick start
 
-- It creates `doc-sync.toml` from `examples/doc-sync.toml` only when missing.
-- It adds `.doc-sync-state.json` to `.gitignore` only when missing.
-- It merges Claude Code `Stop` wiring without replacing existing hooks.
-- It creates `.opencode/plugins/doc-sync.ts` when missing.
-- It refuses to overwrite an unrelated OpenCode plugin unless `--force` is set.
-
-## How It Works
-
-1. Claude Code runs `hook.sh --event stop` from the `Stop` hook, or OpenCode
-   runs `hook.sh --event session.idle` from its closest Stop-like event.
-2. `hook.sh` ignores all other events unless you run it manually with `--check`.
-3. `doc_sync.py` reads changed files from git and compares them with
-   `doc-sync.toml`.
-4. If a watched source changed without its owner docs changing, the hook returns
-   structured JSON with `decision = block`, `prompt`, and `reason` fields.
-5. The same changed-file content and source/doc state blocks once. Retrying the
-   same Stop-like event passes if no doc update is needed.
-
-## Manual Check
-
-Run the hook manually with:
+From an installed package:
 
 ```bash
-tools/doc-sync/hook.sh --check
+doc-sync init
+doc-sync validate --check-paths
+doc-sync check
+doc-sync hook install claude
+doc-sync hook install opencode
 ```
 
-Useful lower-level form:
+From a source checkout, replace `doc-sync` with `python3 bin/doc-sync`.
 
-```bash
-python3 tools/doc-sync/doc_sync.py --root . --config doc-sync.toml
-```
+`doc-sync check` returns `0` when no review is required, `2` when documents
+should be reviewed, and `1` for configuration or operational errors.
 
-## Config Lint
+## Configuration
 
-Validate that `doc-sync.toml` points at real repository paths with:
-
-```bash
-python3 tools/doc-sync/doc_sync.py --root . --config doc-sync.toml --lint-config
-```
-
-The linter checks the TOML shape plus path resolution:
-
-- `paths` entries are existing exact files, existing trailing-slash directories,
-  or globs that match at least one tracked or untracked non-ignored file.
-- `docs` entries are existing exact files because doc-sync compares them against
-  changed file paths.
-- Absolute paths, empty normalized paths, and `.` or `..` path segments are
-  rejected.
-
-Repositories can wire this through pre-commit so stale mappings are caught when
-files are renamed or deleted.
-
-## Config
-
-Project-specific mappings live outside this package, usually at repo root as
-`doc-sync.toml`.
+Project-specific mappings live at the repository root in `doc-sync.toml`:
 
 ```toml
-version = 2
+config_version = 1
 
-[[watch]]
-paths = [
+[[rules]]
+id = "public-api"
+sources = [
   "src/",
   "pyproject.toml",
 ]
-docs = [
+documents = [
   "README.md",
-  "docs/architecture.md",
+  "docs/api.md",
 ]
 ```
 
-Path rules are repo-relative:
+Each rule needs a stable, unique lowercase `id`. When any `sources` pattern
+matches a changed path, every unchanged `documents` entry becomes a review
+target.
+
+Source patterns are repository-relative and case-sensitive:
 
 - `path/to/file.toml` matches one exact file.
-- `path/to/dir/` matches every descendant recursively.
-- `*.toml` matches within one path segment.
-- `**/*.py` uses real globstar semantics and matches top-level and nested files.
+- `path/to/dir/` matches that directory recursively.
+- `src/*.py` keeps `*` within one path segment.
+- `**/*.py` uses globstar semantics and matches top-level and nested files.
 
-When any `paths` entry matches a changed file, every listed `docs` path must
-also be changed, otherwise the hook asks the agent to review those docs.
+Documents are exact file paths. Doc-sync intentionally does not accept document
+globs because its output should identify concrete review targets.
 
-## State
+## Validation
 
-The checker writes `.doc-sync-state.json` at the repo root by default. The file
-is only used to avoid re-blocking the same reviewed condition. Editing the same
-source path again changes the content fingerprint and can block again.
+Structural validation rejects malformed TOML, unknown fields, unsupported
+versions, duplicate rule identifiers, duplicate normalized paths, unsafe
+relative paths, and document entries that use glob or directory syntax:
 
-The state file is removed once there are no changed files or all required docs
-are changed.
-
-## Claude Code
-
-The installer updates `.claude/settings.json`. The minimal hook is:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/tools/doc-sync/hook.sh\" --event stop",
-            "timeout": 30,
-            "statusMessage": "Checking documentation sync..."
-          }
-        ]
-      }
-    ]
-  }
-}
+```bash
+doc-sync validate
 ```
 
-A copyable example lives at `integrations/claude-settings.example.json`.
+Repository-aware validation additionally requires exact paths and directories to
+exist and every source glob to match at least one tracked or untracked
+non-ignored file:
 
-## OpenCode
+```bash
+doc-sync validate --check-paths
+```
 
-OpenCode does not expose Claude Code's exact `Stop` event. Use `session.idle` as
-the closest session-end review point and pass `--event session.idle`.
+The repository ships a `doc-sync-validate` pre-commit hook and a JSON Schema at
+`schemas/doc-sync.schema.json`.
 
-The installer creates `.opencode/plugins/doc-sync.ts`. A copyable example lives
-at `integrations/opencode-plugin.example.ts`.
+## Selecting changes
 
-## Files
+The default compares the working tree, index, and untracked non-ignored files
+with `HEAD`:
 
-- `doc_sync.py` is the reusable checker.
-- `hook.sh` is the Stop/session-idle event gate.
-- `install.py` installs Claude Code and OpenCode integrations.
-- `schema.json` describes the config shape.
-- `examples/doc-sync.toml` is a copyable starting point.
-- `integrations/` contains manual integration examples.
+```bash
+doc-sync check
+```
 
-## Sharing
+Other inputs are explicit:
 
-To publish or reuse this tool elsewhere, copy only `tools/doc-sync/`. Keep the
-target repository's `doc-sync.toml` outside the package so mappings remain
-project-owned.
+```bash
+doc-sync check --staged
+doc-sync check --base origin/main
+doc-sync check --paths-from changed-files.txt
+git diff --name-only -z HEAD^ | tr '\0' '\n' | doc-sync check --paths-from -
+```
+
+Use `--format json` for machine-readable output. The domain status is `pass` or
+`review_required`; agent adapters translate that status into their own protocol.
+
+## Agent hooks
+
+Install integrations without changing an existing config:
+
+```bash
+doc-sync hook install claude
+doc-sync hook install opencode
+doc-sync hook install all --dry-run
+```
+
+The installer validates every requested integration before writing, updates
+older doc-sync wiring in place, and refuses to replace an unrelated OpenCode
+plugin unless `--force` is supplied. Remove only managed wiring with:
+
+```bash
+doc-sync hook uninstall claude
+doc-sync hook uninstall opencode
+```
+
+This removes managed wiring only and keeps `doc-sync.toml`. See
+[Uninstall](docs/installation.md#uninstall) for removing the configuration and
+session state as well.
+
+The Claude adapter returns structured `decision = "block"` JSON with exit code
+`0`, as required by Claude Code's Stop-hook protocol. The OpenCode adapter uses
+exit code `2` and structured output consumed by the generated plugin.
+
+### Acknowledgement state
+
+A review reminder blocks once per agent session and relevant source/document
+state. State lives under the worktree-aware Git metadata path returned by
+`git rev-parse --git-path doc-sync`; it does not add files to the repository or
+require a `.gitignore` entry.
+
+Changing a matched source, affected document, rule, or configuration causes a
+new reminder. Unrelated dirty files do not.
+
+## Python API
+
+The public engine is pure:
+
+```python
+from doc_sync import Rule, evaluate
+
+result = evaluate(
+    [Rule(id="api", sources=("src/",), documents=("docs/api.md",))],
+    ["src/client.py"],
+)
+```
+
+`evaluate()` performs no Git calls and reads or writes no files. Configuration,
+Git discovery, acknowledgement state, CLI formatting, and agent protocols are
+separate layers.
+
+## Development
+
+Run the source tests and checks through the enclosing workspace's Pixi tasks:
+
+```bash
+pixi run -e style ruff check tools/doc-sync
+pixi run -e style ruff format --check tools/doc-sync
+pixi run -e style python -m unittest discover -s tools/doc-sync/tests -v
+```
+
+The project still needs a standalone GitHub repository and repository URLs.
+PyPI publishing is intentionally disabled; tagged builds create artifacts for
+manual installation only.
+
+## License
+
+Doc-sync is released under the [MIT License](LICENSE).
