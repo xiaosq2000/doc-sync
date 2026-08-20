@@ -73,12 +73,17 @@ Agent integrations are optional:
 
 ```bash
 doc-sync hook install claude
+doc-sync hook install codex
 doc-sync hook install opencode
 doc-sync hook install all --dry-run
 ```
 
-The installers update repository-local settings. They do not install Claude
-Code or OpenCode themselves.
+The installers update repository-local settings. They do not install the agents
+themselves.
+
+Codex additionally requires the repository to be a trusted Codex project and
+the installed hook to be trusted from `/hooks` before it runs. See
+[Trusting the Codex hook](../README.md#trusting-the-codex-hook).
 
 ## Upgrade
 
@@ -111,15 +116,15 @@ doc-sync hook uninstall all --dry-run
 doc-sync hook uninstall all
 ```
 
-`--dry-run` prints the planned changes without touching anything. Use
-`doc-sync hook uninstall claude` or `doc-sync hook uninstall opencode` for a
-single integration, and `--root /path/to/repository` to act on a repository you
-are not inside.
+`--dry-run` prints the planned changes without touching anything. Name a single
+integration — `claude`, `codex`, or `opencode` — to remove just that one, and
+pass `--root /path/to/repository` to act on a repository you are not inside.
 
-Only wiring doc-sync manages is removed: the `Stop` entry it added to
-`.claude/settings.json`, and the generated `.opencode/plugins/doc-sync.ts`. Your
-own hooks and settings in those files are left exactly as they were. An OpenCode
-plugin that doc-sync did not generate is refused rather than deleted:
+Only wiring doc-sync manages is removed: the `Stop` entries it added to
+`.claude/settings.json` and `.codex/hooks.json`, and the generated
+`.opencode/plugins/doc-sync.ts`. Your own hooks and settings in those files are
+left exactly as they were. An OpenCode plugin that doc-sync did not generate is
+refused rather than deleted:
 
 ```text
 doc-sync error: <path> is not managed by doc-sync; refusing to remove it
@@ -145,10 +150,11 @@ worktree-aware — `.git/doc-sync` in a primary worktree and
 in each worktree that ran an agent hook. Neither path is tracked, so nothing
 needs to be committed.
 
-If `.claude/settings.json` or `.opencode/` existed only for doc-sync, they may
-now be empty and can be removed as well. If you wired the `doc-sync-validate`
-pre-commit hook, drop its entry from `.pre-commit-config.yaml`; `pre-commit gc`
-then clears its cached environment.
+If `.claude/settings.json`, `.codex/hooks.json`, or `.opencode/` existed only
+for doc-sync, they may now be empty and can be removed as well. Codex keeps its
+own trust record for a hook it has seen; clear that from `/hooks` inside Codex.
+If you wired the `doc-sync-validate` pre-commit hook, drop its entry from
+`.pre-commit-config.yaml`; `pre-commit gc` then clears its cached environment.
 
 ### 3. Remove the tool
 
@@ -168,6 +174,9 @@ environment directory.
   `pipx ensurepath` and open a new shell.
 - If doc-sync cannot locate a repository, run it inside a Git worktree or pass
   `--root /path/to/repository` to the command.
+- If an installed Codex hook never fires, check `/hooks` inside Codex. An entry
+  that is missing means the repository is not a trusted Codex project; an entry
+  listed as `untrusted` or `modified` needs review there.
 - Exit code `2` from `doc-sync check` means documentation review is required;
   it is not an operational failure. Exit code `1` reports configuration or Git
   errors.

@@ -6,7 +6,7 @@ generate documentation, inspect prose quality, or claim that two files are
 semantically synchronized.
 
 The same rule engine supports manual checks, pre-commit validation, Claude Code
-`Stop` hooks, and OpenCode `session.idle` plugins.
+and Codex CLI `Stop` hooks, and OpenCode `session.idle` plugins.
 
 > Doc-sync is intentionally not published to PyPI yet. Install it manually from
 > a source checkout using the [installation guide](docs/installation.md).
@@ -33,6 +33,7 @@ doc-sync init
 doc-sync validate --check-paths
 doc-sync check
 doc-sync hook install claude
+doc-sync hook install codex
 doc-sync hook install opencode
 ```
 
@@ -122,6 +123,7 @@ Install integrations without changing an existing config:
 
 ```bash
 doc-sync hook install claude
+doc-sync hook install codex
 doc-sync hook install opencode
 doc-sync hook install all --dry-run
 ```
@@ -132,6 +134,7 @@ plugin unless `--force` is supplied. Remove only managed wiring with:
 
 ```bash
 doc-sync hook uninstall claude
+doc-sync hook uninstall codex
 doc-sync hook uninstall opencode
 ```
 
@@ -139,9 +142,28 @@ This removes managed wiring only and keeps `doc-sync.toml`. See
 [Uninstall](docs/installation.md#uninstall) for removing the configuration and
 session state as well.
 
-The Claude adapter returns structured `decision = "block"` JSON with exit code
-`0`, as required by Claude Code's Stop-hook protocol. The OpenCode adapter uses
-exit code `2` and structured output consumed by the generated plugin.
+Each integration is wired where that agent looks for it: a `Stop` entry in
+`.claude/settings.json`, a `Stop` entry in `.codex/hooks.json`, and a generated
+`.opencode/plugins/doc-sync.ts`. Hooks doc-sync did not write are preserved.
+
+Codex CLI implements Claude Code's Stop-hook wire format, so both adapters read
+the same `session_id`/`cwd` payload and return structured `decision = "block"`
+JSON with exit code `0`. The OpenCode adapter uses exit code `2` and structured
+output consumed by the generated plugin.
+
+### Trusting the Codex hook
+
+Codex applies two gates that Claude Code and OpenCode do not, so installing the
+hook is not enough to make it run:
+
+- The repository must be a trusted Codex project. Codex offers this the first
+  time it starts there; until then it does not read `.codex/hooks.json` at all.
+- The hook itself must be reviewed. A newly installed hook reports as
+  `untrusted`; run `/hooks` inside Codex to trust it. Trust is recorded against
+  a hash of the command, so re-running `doc-sync hook install codex` after a
+  release that changes the command requires trusting it again.
+
+Both gates are deliberate: doc-sync will not write trust records on your behalf.
 
 ### Acknowledgement state
 

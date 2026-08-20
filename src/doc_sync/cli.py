@@ -21,7 +21,7 @@ from doc_sync.git import (
     changed_worktree_paths,
     resolve_root,
 )
-from doc_sync.integrations.claude import blocking_output, parse_context
+from doc_sync.integrations.stop_hook import blocking_output, parse_context
 from doc_sync.model import Evaluation, Status
 from doc_sync.render import REVIEW_GUIDANCE, build_review_message
 from doc_sync.state import AcknowledgementStore, default_state_directory
@@ -120,10 +120,16 @@ def _hook_evaluation(
     return result
 
 
-def _run_claude_hook(args: argparse.Namespace) -> int:
+def _run_stop_hook(args: argparse.Namespace) -> int:
+    """Run the Stop-hook protocol Claude Code and Codex CLI both speak."""
     try:
-        context = parse_context(sys.stdin.read())
-        raw_root = args.root or os.environ.get("CLAUDE_PROJECT_DIR") or str(context.cwd)
+        context = parse_context(sys.stdin.read(), agent=args.agent)
+        project_directory = (
+            os.environ.get(args.project_directory_variable)
+            if args.project_directory_variable
+            else None
+        )
+        raw_root = args.root or project_directory or str(context.cwd)
         result = _hook_evaluation(
             args, root=resolve_root(raw_root), session_id=context.session_id
         )
@@ -144,8 +150,11 @@ def _run_opencode_hook(args: argparse.Namespace) -> int:
     return EXIT_REVIEW_REQUIRED
 
 
+INTEGRATIONS = ("claude", "codex", "opencode")
+
+
 def _targets(raw_target: str) -> tuple[str, ...]:
-    return ("claude", "opencode") if raw_target == "all" else (raw_target,)
+    return INTEGRATIONS if raw_target == "all" else (raw_target,)
 
 
 def _run_hook_install(args: argparse.Namespace) -> int:
@@ -179,6 +188,21 @@ def _add_repository_arguments(parser: argparse.ArgumentParser) -> None:
         "--config",
         default=CONFIG_FILENAME,
         help=f"Configuration path relative to the repository (default: {CONFIG_FILENAME}).",
+    )
+
+
+def _add_stop_hook_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    agent: str,
+    project_directory_variable: str | None,
+) -> None:
+    _add_repository_arguments(parser)
+    parser.add_argument("--state-directory")
+    parser.set_defaults(
+        handler=_run_stop_hook,
+        agent=agent,
+        project_directory_variable=project_directory_variable,
     )
 
 
@@ -218,9 +242,14 @@ def _build_parser() -> argparse.ArgumentParser:
     hook_subparsers = hook.add_subparsers(dest="hook_command", required=True)
 
     claude = hook_subparsers.add_parser("claude", help="Run the Claude Stop adapter.")
-    _add_repository_arguments(claude)
-    claude.add_argument("--state-directory")
-    claude.set_defaults(handler=_run_claude_hook)
+    _add_stop_hook_arguments(
+        claude, agent="Claude Code", project_directory_variable="CLAUDE_PROJECT_DIR"
+    )
+
+    codex = hook_subparsers.add_parser("codex", help="Run the Codex Stop adapter.")
+    # Codex exposes no project-directory variable, so the payload `cwd` is the
+    # only hint about which repository the session is working in.
+    _add_stop_hook_arguments(codex, agent="Codex", project_directory_variable=None)
 
     opencode = hook_subparsers.add_parser(
         "opencode", help="Run the OpenCode session.idle adapter."
@@ -231,14 +260,14 @@ def _build_parser() -> argparse.ArgumentParser:
     opencode.set_defaults(handler=_run_opencode_hook)
 
     install = hook_subparsers.add_parser("install", help="Install agent hooks.")
-    install.add_argument("target", choices=("claude", "opencode", "all"))
+    install.add_argument("target", choices=(*INTEGRATIONS, "all"))
     _add_root_argument(install)
     install.add_argument("--dry-run", action="store_true")
     install.add_argument("--force", action="store_true")
     install.set_defaults(handler=_run_hook_install)
 
     uninstall = hook_subparsers.add_parser("uninstall", help="Remove agent hooks.")
-    uninstall.add_argument("target", choices=("claude", "opencode", "all"))
+    uninstall.add_argument("target", choices=(*INTEGRATIONS, "all"))
     _add_root_argument(uninstall)
     uninstall.add_argument("--dry-run", action="store_true")
     uninstall.set_defaults(handler=_run_hook_uninstall)

@@ -17,12 +17,19 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 CLAUDE_SETTINGS = Path(".claude/settings.json")
+CODEX_HOOKS = Path(".codex/hooks.json")
 OPENCODE_PLUGIN = Path(".opencode/plugins/doc-sync.ts")
 OPENCODE_MARKER = "managed-id: doc-sync.opencode.v1"
 # Wiring written by doc-sync 0.0.x, recognized only so upgrades can replace it.
 _LEGACY_HOOK_SCRIPT = "tools/doc-sync/hook.sh"
 HOOK_TIMEOUT = 30
 HOOK_STATUS_MESSAGE = "Checking documentation impact..."
+# Codex discovers a project hook but refuses to run it until the command hash
+# is trusted, and every change to that command requires a fresh review.
+CODEX_TRUST_NOTICE = (
+    "Codex runs a project hook only after you trust it: open Codex in this "
+    "repository and run `/hooks` to review the doc-sync entry."
+)
 # Agent hooks run in a non-interactive shell, where `python` is frequently
 # absent or only a login-shell alias. `python3` is the name POSIX installs.
 SOURCE_INTERPRETER = "python3"
@@ -68,6 +75,18 @@ def _claude_command(root: Path) -> str:
     )
 
 
+def _codex_command(root: Path) -> str:
+    relative = _relative_source_launcher(root)
+    if relative is None:
+        return "doc-sync hook codex"
+    # Codex exposes no project-directory variable and runs hooks from the
+    # session working directory, which may be any directory in the repository,
+    # so the launcher is located from the worktree Git itself reports.
+    return (
+        f'{SOURCE_INTERPRETER} "$(git rev-parse --show-toplevel)/{relative}" hook codex'
+    )
+
+
 def _opencode_invocation(root: Path) -> str:
     relative = _relative_source_launcher(root)
     if relative is None:
@@ -97,19 +116,52 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", value)
 
 
-def _managed_claude_command(value: object) -> bool:
-    """Recognize any Claude hook command doc-sync has written, at any layout."""
-    if not isinstance(value, str):
-        return False
-    if "hook claude" in value and "doc-sync" in value:
-        return True
-    return _LEGACY_HOOK_SCRIPT in value
+@dataclass(frozen=True)
+class StopHookFile:
+    """One agent's `hooks.Stop` document and the command doc-sync owns in it."""
+
+    path: Path
+    command: str
+    subcommand: str
+    # Only Claude Code was ever wired by the 0.0.x shell script.
+    legacy: bool = False
+
+    def is_managed(self, value: object) -> bool:
+        """Recognize any command doc-sync has written here, at any layout."""
+        if not isinstance(value, str):
+            return False
+        if self.subcommand in value and "doc-sync" in value:
+            return True
+        return self.legacy and _LEGACY_HOOK_SCRIPT in value
 
 
-def _prepare_claude_install(root: Path) -> PlannedWrite | None:
-    path = root / CLAUDE_SETTINGS
-    settings = _load_json_object(path)
-    hooks_value = settings.setdefault("hooks", {})
+def _claude_stop_hook(root: Path) -> StopHookFile:
+    return StopHookFile(
+        path=root / CLAUDE_SETTINGS,
+        command=_claude_command(root),
+        subcommand="hook claude",
+        legacy=True,
+    )
+
+
+def _codex_stop_hook(root: Path) -> StopHookFile:
+    return StopHookFile(
+        path=root / CODEX_HOOKS,
+        command=_codex_command(root),
+        subcommand="hook codex",
+    )
+
+
+def _prepare_stop_hook_install(hook: StopHookFile) -> PlannedWrite | None:
+    """Add or refresh the managed `Stop` handler, keeping every other entry.
+
+    Claude Code stores its hooks under `hooks` in a wider settings document and
+    Codex CLI stores them under `hooks` in a dedicated file, so one merge
+    serves both.
+    """
+    path = hook.path
+    document = _load_json_object(path)
+    hooks_value = document.setdefault("hooks", {})
     if not isinstance(hooks_value, dict):
         raise InstallError(f"{path}: `hooks` must be an object")
     hooks = cast("dict[str, Any]", hooks_value)
@@ -119,7 +171,7 @@ def _prepare_claude_install(root: Path) -> PlannedWrite | None:
 
     handler_payload = {
         "type": "command",
-        "command": _claude_command(root),
+        "command": hook.command,
         "timeout": HOOK_TIMEOUT,
         "statusMessage": HOOK_STATUS_MESSAGE,
     }
@@ -131,26 +183,25 @@ def _prepare_claude_install(root: Path) -> PlannedWrite | None:
         if not isinstance(handlers, list):
             continue
         for handler in handlers:
-            if isinstance(handler, dict) and _managed_claude_command(
-                handler.get("command")
-            ):
+            if isinstance(handler, dict) and hook.is_managed(handler.get("command")):
                 handler.update(handler_payload)
                 found = True
     if not found:
         stop_value.append({"hooks": [dict(handler_payload)]})
 
-    content = json.dumps(settings, indent=2) + "\n"
+    content = json.dumps(document, indent=2) + "\n"
     if path.exists() and path.read_text(encoding="utf-8") == content:
         return None
     return PlannedWrite(path, content)
 
 
-def _prepare_claude_uninstall(root: Path) -> PlannedWrite | None:
-    path = root / CLAUDE_SETTINGS
+def _prepare_stop_hook_uninstall(hook: StopHookFile) -> PlannedWrite | None:
+    """Drop only the managed `Stop` handler, leaving every other entry intact."""
+    path = hook.path
     if not path.exists():
         return None
-    settings = _load_json_object(path)
-    hooks = settings.get("hooks")
+    document = _load_json_object(path)
+    hooks = document.get("hooks")
     if not isinstance(hooks, dict):
         return None
     stop_value = hooks.get("Stop")
@@ -168,8 +219,7 @@ def _prepare_claude_uninstall(root: Path) -> PlannedWrite | None:
             handler
             for handler in handlers
             if not (
-                isinstance(handler, dict)
-                and _managed_claude_command(handler.get("command"))
+                isinstance(handler, dict) and hook.is_managed(handler.get("command"))
             )
         ]
         changed |= len(retained_handlers) != len(handlers)
@@ -185,8 +235,8 @@ def _prepare_claude_uninstall(root: Path) -> PlannedWrite | None:
     else:
         hooks.pop("Stop", None)
     if not hooks:
-        settings.pop("hooks", None)
-    return PlannedWrite(path, json.dumps(settings, indent=2) + "\n")
+        document.pop("hooks", None)
+    return PlannedWrite(path, json.dumps(document, indent=2) + "\n")
 
 
 def _prepare_opencode_install(root: Path, *, force: bool) -> PlannedWrite | None:
@@ -250,8 +300,17 @@ def install_hooks(
 ) -> None:
     """Install selected integrations after all changes have been validated."""
     writes: list[PlannedWrite] = []
-    if "claude" in targets and (planned := _prepare_claude_install(root)):
+    if "claude" in targets and (
+        planned := _prepare_stop_hook_install(_claude_stop_hook(root))
+    ):
         writes.append(planned)
+    codex_write = (
+        _prepare_stop_hook_install(_codex_stop_hook(root))
+        if "codex" in targets
+        else None
+    )
+    if codex_write:
+        writes.append(codex_write)
     if "opencode" in targets and (
         planned := _prepare_opencode_install(root, force=force)
     ):
@@ -261,13 +320,21 @@ def install_hooks(
     _apply(writes, dry_run=dry_run)
     if not writes:
         print("all selected doc-sync hooks are already current")
+    if codex_write:
+        print(CODEX_TRUST_NOTICE)
 
 
 def uninstall_hooks(root: Path, targets: tuple[str, ...], *, dry_run: bool) -> None:
     """Remove selected managed integrations while retaining configuration."""
     writes: list[PlannedWrite] = []
     removals: list[Path] = []
-    if "claude" in targets and (planned := _prepare_claude_uninstall(root)):
+    if "claude" in targets and (
+        planned := _prepare_stop_hook_uninstall(_claude_stop_hook(root))
+    ):
+        writes.append(planned)
+    if "codex" in targets and (
+        planned := _prepare_stop_hook_uninstall(_codex_stop_hook(root))
+    ):
         writes.append(planned)
     if "opencode" in targets and (removal := _prepare_opencode_uninstall(root)):
         removals.append(removal)

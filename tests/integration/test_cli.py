@@ -24,39 +24,60 @@ class CliTest(unittest.TestCase):
             assert payload["status"] == "review_required"
             assert payload["review_targets"] == ["README.md"]
 
-    def test_claude_adapter_blocks_with_json_on_exit_zero_once(self) -> None:
+    def test_stop_adapters_block_with_json_on_exit_zero_once(self) -> None:
+        # Codex CLI implements Claude Code's Stop-hook wire format, so one
+        # contract covers both adapters.
+        for agent in ("claude", "codex"):
+            with self.subTest(agent=agent), temporary_repository() as root:
+                (root / "src/app.py").write_text("v2", encoding="utf-8")
+                payload = json.dumps({"session_id": "session-1", "cwd": str(root)})
+                arguments = [
+                    "hook",
+                    agent,
+                    "--root",
+                    str(root),
+                    "--state-directory",
+                    str(root / "state"),
+                ]
+                first_output = io.StringIO()
+                with (
+                    patch("sys.stdin", io.StringIO(payload)),
+                    redirect_stdout(first_output),
+                ):
+                    first_exit = main(arguments)
+                second_output = io.StringIO()
+                with (
+                    patch("sys.stdin", io.StringIO(payload)),
+                    redirect_stdout(second_output),
+                ):
+                    second_exit = main(arguments)
+
+                response = json.loads(first_output.getvalue())
+                assert first_exit == 0
+                assert response["decision"] == "block"
+                assert "Documentation may need review" in response["reason"]
+                assert second_exit == 0
+                assert second_output.getvalue() == ""
+
+    def test_codex_adapter_resolves_the_repository_from_the_payload_cwd(self) -> None:
+        # Codex exposes no project-directory variable, so a session started in
+        # a subdirectory has to reach the repository through `cwd` alone.
         with temporary_repository() as root:
             (root / "src/app.py").write_text("v2", encoding="utf-8")
-            payload = json.dumps({"session_id": "session-1", "cwd": str(root)})
-            arguments = [
-                "hook",
-                "claude",
-                "--root",
-                str(root),
-                "--state-directory",
-                str(root / "state"),
-            ]
-            first_output = io.StringIO()
-            with (
-                patch("sys.stdin", io.StringIO(payload)),
-                redirect_stdout(first_output),
-            ):
-                first_exit = main(arguments)
-            second_output = io.StringIO()
-            with (
-                patch("sys.stdin", io.StringIO(payload)),
-                redirect_stdout(second_output),
-            ):
-                second_exit = main(arguments)
+            nested = root / "src"
+            payload = json.dumps({"session_id": "session-1", "cwd": str(nested)})
+            output = io.StringIO()
+            with patch("sys.stdin", io.StringIO(payload)), redirect_stdout(output):
+                exit_code = main(
+                    ["hook", "codex", "--state-directory", str(root / "state")]
+                )
 
-            response = json.loads(first_output.getvalue())
-            assert first_exit == 0
+            response = json.loads(output.getvalue())
+            assert exit_code == 0
             assert response["decision"] == "block"
-            assert "Documentation may need review" in response["reason"]
-            assert second_exit == 0
-            assert second_output.getvalue() == ""
+            assert "README.md" in response["reason"]
 
-    def test_claude_config_error_is_structured_blocking_json(self) -> None:
+    def test_stop_hook_config_error_is_structured_blocking_json(self) -> None:
         with temporary_root() as root:
             initialize_repository(root)
             payload = json.dumps({"session_id": "session-1", "cwd": str(root)})
