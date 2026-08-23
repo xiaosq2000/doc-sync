@@ -1,46 +1,67 @@
 # Doc-Sync
 
-Doc-sync maps changed source files to documentation that should be reviewed. It
-is a deterministic Git-based guard for agent-assisted repositories: it does not
-generate documentation, inspect prose quality, or claim that two files are
-semantically synchronized.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![No Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#)
 
-The same rule engine supports manual checks, pre-commit validation, Claude Code
-and Codex CLI `Stop` hooks, and OpenCode `session.idle` plugins.
+**Keep documentation honest as AI agents change your code.**
 
-> Doc-sync is intentionally not published to PyPI yet. Install it manually from
-> a source checkout using the [installation guide](docs/installation.md).
+AI coding agents move fast — a single session can touch dozens of files across a
+monorepo. Documentation drifts silently. By the time a human notices, the docs
+describe a codebase that no longer exists.
 
-## Requirements
+Doc-sync is a deterministic guard that maps source files to the documents that
+describe them. When a matched source changes and its document doesn't, doc-sync
+blocks the agent and asks for a review — before the session ends, not weeks
+later.
 
-- Python 3.11 or newer
-- Git
-- No Python runtime dependencies
-
-## Installation
-
-Use an isolated application environment when possible. The
-[installation guide](docs/installation.md) covers `uv`, `pipx`, virtual
-environments, running without installation, upgrades,
-[uninstallation](docs/installation.md#uninstall), and PATH troubleshooting.
+- **Deterministic.** No LLM calls, no heuristics — a TOML file maps sources to
+  documents and the engine evaluates changed paths against it.
+- **Zero dependencies.** Pure Python, nothing to install beyond the standard
+  library.
+- **Agent-native.** First-class hooks for Claude Code, Codex CLI, and OpenCode.
+  One command wires each integration.
+- **Git-aware.** Compares against HEAD, staged changes, merge bases, or explicit
+  file lists. Acknowledgement state lives in Git metadata — no dotfiles in your
+  working tree.
 
 ## Quick start
 
-From an installed package:
-
 ```bash
-doc-sync init
-doc-sync validate --check-paths
-doc-sync check
-doc-sync hook install claude
-doc-sync hook install codex
-doc-sync hook install opencode
+doc-sync init                    # create doc-sync.toml with starter rules
+doc-sync validate --check-paths  # verify paths exist in the repo
+doc-sync check                   # run the check
+doc-sync hook install claude     # wire a Stop hook for Claude Code
 ```
 
-From a source checkout, replace `doc-sync` with `python3 bin/doc-sync`.
+## Install
 
-`doc-sync check` returns `0` when no review is required, `2` when documents
-should be reviewed, and `1` for configuration or operational errors.
+Requires Python 3.11+ and Git.
+
+```bash
+# uv (recommended)
+uv tool install git+https://github.com/xiaosq2000/doc-sync.git
+
+# pipx
+pipx install git+https://github.com/xiaosq2000/doc-sync.git
+```
+
+In a [pixi](https://pixi.sh) workspace, add doc-sync as a PyPI dependency in
+`pixi.toml`:
+
+```toml
+[pypi-dependencies]
+doc-sync = { git = "https://github.com/xiaosq2000/doc-sync.git" }
+```
+
+Or run once without installing:
+
+```bash
+uvx --from git+https://github.com/xiaosq2000/doc-sync.git doc-sync --help
+```
+
+See the [installation guide](docs/installation.md) for virtual-environment
+setup, source checkouts, upgrades, uninstallation, and troubleshooting.
 
 ## Configuration
 
@@ -72,54 +93,48 @@ Source patterns are repository-relative and case-sensitive:
 - `src/*.py` keeps `*` within one path segment.
 - `**/*.py` uses globstar semantics and matches top-level and nested files.
 
-Documents are exact file paths. Doc-sync intentionally does not accept document
+Documents are exact file paths — doc-sync intentionally does not accept document
 globs because its output should identify concrete review targets.
 
 ## Validation
 
-Structural validation rejects malformed TOML, unknown fields, unsupported
-versions, duplicate rule identifiers, duplicate normalized paths, unsafe
-relative paths, and document entries that use glob or directory syntax:
+Structural validation catches malformed TOML, unknown fields, unsupported
+versions, duplicate IDs, and unsafe paths:
 
 ```bash
 doc-sync validate
 ```
 
-Repository-aware validation additionally requires exact paths and directories to
-exist and every source glob to match at least one tracked or untracked
-non-ignored file:
+Add `--check-paths` to also verify that every path and directory exists and every
+glob matches at least one tracked file:
 
 ```bash
 doc-sync validate --check-paths
 ```
 
-The repository ships a `doc-sync-validate` pre-commit hook and a JSON Schema at
-`schemas/doc-sync.schema.json`.
+A `doc-sync-validate` pre-commit hook and a JSON Schema at
+`schemas/doc-sync.schema.json` are included in the repository.
 
 ## Selecting changes
 
-The default compares the working tree, index, and untracked non-ignored files
-with `HEAD`:
+By default, `doc-sync check` compares the working tree, index, and untracked
+non-ignored files against `HEAD`:
 
 ```bash
 doc-sync check
-```
-
-Other inputs are explicit:
-
-```bash
 doc-sync check --staged
 doc-sync check --base origin/main
 doc-sync check --paths-from changed-files.txt
 git diff --name-only -z HEAD^ | tr '\0' '\n' | doc-sync check --paths-from -
 ```
 
-Use `--format json` for machine-readable output. The domain status is `pass` or
-`review_required`; agent adapters translate that status into their own protocol.
+Use `--format json` for machine-readable output. Exit code `0` means no review
+is needed; `2` means documents should be reviewed; `1` signals a configuration
+or operational error.
 
 ## Agent hooks
 
-Install integrations without changing an existing config:
+Wire an integration without editing agent config files yourself:
 
 ```bash
 doc-sync hook install claude
@@ -128,83 +143,30 @@ doc-sync hook install opencode
 doc-sync hook install all --dry-run
 ```
 
-The installer validates every requested integration before writing, updates
-older doc-sync wiring in place, and refuses to replace an unrelated OpenCode
-plugin unless `--force` is supplied. Remove only managed wiring with:
+Each integration is placed where the agent expects it: a `Stop` entry in
+`.claude/settings.json`, a `Stop` entry in `.codex/hooks.json`, or a generated
+`.opencode/plugins/doc-sync.ts`. Existing hooks are preserved; doc-sync only
+manages its own entries.
+
+Remove managed wiring with:
 
 ```bash
-doc-sync hook uninstall claude
-doc-sync hook uninstall codex
-doc-sync hook uninstall opencode
+doc-sync hook uninstall claude   # or codex, opencode, all
 ```
 
-This removes managed wiring only and keeps `doc-sync.toml`. See
-[Uninstall](docs/installation.md#uninstall) for removing the configuration and
-session state as well.
+### Codex trust
 
-Each integration is wired where that agent looks for it: a `Stop` entry in
-`.claude/settings.json`, a `Stop` entry in `.codex/hooks.json`, and a generated
-`.opencode/plugins/doc-sync.ts`. Hooks doc-sync did not write are preserved.
-
-Codex CLI implements Claude Code's Stop-hook wire format, so both adapters read
-the same `session_id`/`cwd` payload and return structured `decision = "block"`
-JSON with exit code `0`. The OpenCode adapter uses exit code `2` and structured
-output consumed by the generated plugin.
-
-### Trusting the Codex hook
-
-Codex applies two gates that Claude Code and OpenCode do not, so installing the
-hook is not enough to make it run:
-
-- The repository must be a trusted Codex project. Codex offers this the first
-  time it starts there; until then it does not read `.codex/hooks.json` at all.
-- The hook itself must be reviewed. A newly installed hook reports as
-  `untrusted`; run `/hooks` inside Codex to trust it. Trust is recorded against
-  a hash of the command, so re-running `doc-sync hook install codex` after a
-  release that changes the command requires trusting it again.
-
-Both gates are deliberate: doc-sync will not write trust records on your behalf.
+Codex requires two extra steps before a hook runs: the repository must be a
+trusted Codex project (offered on first launch), and the hook itself must be
+reviewed from `/hooks` inside Codex. Doc-sync will not write trust records on
+your behalf.
 
 ### Acknowledgement state
 
-A review reminder blocks once per agent session and relevant source/document
-state. State lives under the worktree-aware Git metadata path returned by
-`git rev-parse --git-path doc-sync`; it does not add files to the repository or
-require a `.gitignore` entry.
-
-Changing a matched source, affected document, rule, or configuration causes a
-new reminder. Unrelated dirty files do not.
-
-## Python API
-
-The public engine is pure:
-
-```python
-from doc_sync import Rule, evaluate
-
-result = evaluate(
-    [Rule(id="api", sources=("src/",), documents=("docs/api.md",))],
-    ["src/client.py"],
-)
-```
-
-`evaluate()` performs no Git calls and reads or writes no files. Configuration,
-Git discovery, acknowledgement state, CLI formatting, and agent protocols are
-separate layers.
-
-## Development
-
-Run the source tests and checks through the enclosing workspace's Pixi tasks:
-
-```bash
-pixi run -e style ruff check tools/doc-sync
-pixi run -e style ruff format --check tools/doc-sync
-pixi run -e style python -m unittest discover -s tools/doc-sync/tests -v
-```
-
-The project still needs a standalone GitHub repository and repository URLs.
-PyPI publishing is intentionally disabled; tagged builds create artifacts for
-manual installation only.
+A review reminder fires once per agent session and relevant source/document
+state. State lives under `git rev-parse --git-path doc-sync` — nothing is added
+to the repository or `.gitignore`. Changing a matched source, document, rule, or
+configuration triggers a new reminder; unrelated dirty files do not.
 
 ## License
 

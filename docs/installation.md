@@ -3,15 +3,14 @@
 Doc-sync requires Python 3.11 or newer and Git. It has no Python runtime
 dependencies.
 
-Doc-sync is intentionally not published to PyPI yet. Install it from a local
-source checkout; a package-index installation is not currently supported.
+The [README](../README.md#install) covers the recommended one-line installs
+(`uv`, `pipx`, `pixi`). This guide covers source checkouts, virtual
+environments, upgrades, uninstallation, and troubleshooting.
 
 ## Install from a source checkout
 
-For a command-line application, an isolated tool environment avoids changing
-the packages in your project. Obtain the source directory and run one of these
-commands from the directory containing `pyproject.toml`. In the current
-monorepo, that directory is `tools/doc-sync`.
+Clone the repository and run one of these commands from the directory containing
+`pyproject.toml`:
 
 Using `uv`:
 
@@ -53,37 +52,6 @@ python -m venv .venv
 python -m pip install --editable .
 doc-sync --help
 ```
-
-## Set up a repository
-
-Run doc-sync from anywhere inside the Git repository that should be checked:
-
-```bash
-doc-sync init
-doc-sync validate --check-paths
-doc-sync check
-```
-
-Edit the generated `doc-sync.toml` before relying on the check. Its rules map
-changed source paths to concrete documents that should be reviewed. See the
-[configuration guide](../README.md#configuration) for the supported path
-syntax and a complete example.
-
-Agent integrations are optional:
-
-```bash
-doc-sync hook install claude
-doc-sync hook install codex
-doc-sync hook install opencode
-doc-sync hook install all --dry-run
-```
-
-The installers update repository-local settings. They do not install the agents
-themselves.
-
-Codex additionally requires the repository to be a trusted Codex project and
-the installed hook to be trusted from `/hooks` before it runs. See
-[Trusting the Codex hook](../README.md#trusting-the-codex-hook).
 
 ## Upgrade
 
