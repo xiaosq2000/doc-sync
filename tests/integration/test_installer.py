@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import stat
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -123,6 +124,7 @@ class InstallerTest(unittest.TestCase):
             assert not (root / ".codex/hooks.json").exists()
             assert not (root / "doc-sync.toml").exists()
 
+    @unittest.skipIf(sys.platform == "win32", "Windows lacks POSIX permission bits")
     def test_preserves_existing_settings_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

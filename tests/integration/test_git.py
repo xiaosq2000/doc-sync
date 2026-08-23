@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -48,6 +49,7 @@ class GitRepositoryTest(unittest.TestCase):
                 "untracked.txt",
             )
 
+    @unittest.skipIf(sys.platform == "win32", "NTFS disallows newlines in filenames")
     def test_preserves_newline_in_file_name(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

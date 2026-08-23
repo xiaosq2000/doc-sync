@@ -41,7 +41,8 @@ def _changed_paths(args: argparse.Namespace, root: Path) -> tuple[str, ...]:
             content = sys.stdin.read()
         else:
             content = Path(args.paths_from).read_text(encoding="utf-8")
-        return tuple(path for path in content.splitlines() if path)
+        paths: list[str] = [path for path in content.splitlines() if path]
+        return tuple(paths)
     if args.staged:
         return changed_staged_paths(root)
     if args.base:
