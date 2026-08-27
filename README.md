@@ -2,7 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![No Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#)
 
 **Keep documentation honest as AI agents change your code.**
 
@@ -17,8 +16,8 @@ later.
 
 - **Deterministic.** No LLM calls, no heuristics — a TOML file maps sources to
   documents and the engine evaluates changed paths against it.
-- **Zero dependencies.** Pure Python, nothing to install beyond the standard
-  library.
+- **Lightweight.** Pure Python with a single dependency, `pathspec`, for
+  gitignore-style pattern matching.
 - **Agent-native.** First-class hooks for Claude Code, Codex CLI, and OpenCode.
   One command wires each integration.
 - **Git-aware.** Compares against HEAD, staged changes, merge bases, or explicit
@@ -92,6 +91,11 @@ Source patterns are repository-relative and case-sensitive:
 - `path/to/dir/` matches that directory recursively.
 - `src/*.py` keeps `*` within one path segment.
 - `**/*.py` uses globstar semantics and matches top-level and nested files.
+
+Every pattern is anchored to the repository root, so `pyproject.toml` names the
+root file and `src/` never matches a nested `vendor/src/`. Matching at any depth
+is opt-in through an explicit `**/` prefix: `app.py` is the root file, while
+`**/app.py` is that file anywhere in the repository.
 
 Documents are exact file paths — doc-sync intentionally does not accept document
 globs because its output should identify concrete review targets.

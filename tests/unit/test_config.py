@@ -1,64 +1,103 @@
 from __future__ import annotations
 
-import unittest
+from typing import TYPE_CHECKING
+
+import pytest
 
 from doc_sync.config import ConfigError, load_config, validate_repository_config
-from tests.support import temporary_repository, temporary_root, write_config
+from tests.support import write_config
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class LoadConfigTest(unittest.TestCase):
-    def test_loads_named_rules(self) -> None:
-        with temporary_root() as root:
-            config = load_config(write_config(root))
-
-            assert config.config_version == 1
-            assert config.rules[0].id == "application"
-
-    def test_rejects_unknown_root_key(self) -> None:
-        with temporary_root() as root:
-            path = write_config(root)
-            path.write_text(
-                path.read_text().replace(
-                    "config_version = 1\n",
-                    "config_version = 1\nunknown = true\n",
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(ConfigError, "unknown key"):
-                load_config(path)
-
-    def test_rejects_unknown_rule_key(self) -> None:
-        with temporary_root() as root:
-            path = root / "doc-sync.toml"
-            path.write_text(
-                """config_version = 1
+UNKNOWN_RULE_KEY = """config_version = 1
 [[rules]]
 id = "application"
 sources = ["src/"]
 document = ["README.md"]
-""",
-                encoding="utf-8",
-            )
+"""
 
-            with self.assertRaisesRegex(ConfigError, "`document`"):
-                load_config(path)
+LEGACY_LAYOUT = """version = 1
+[[watch]]
+sources = ["src/"]
+"""
 
-    def test_rejects_duplicate_normalized_paths(self) -> None:
-        with temporary_root() as root:
-            path = write_config(root)
-            content = path.read_text().replace(
-                'sources = ["src/"]', 'sources = ["src/", "./src/"]'
-            )
-            path.write_text(content, encoding="utf-8")
+GLOB_DOCUMENT = """config_version = 1
+[[rules]]
+id = "application"
+sources = ["src/"]
+documents = ["docs/*.md"]
+"""
 
-            with self.assertRaisesRegex(ConfigError, "duplicate path"):
-                load_config(path)
 
-    def test_repository_validation_checks_paths(self) -> None:
-        with temporary_repository() as root:
-            config_path = root / "doc-sync.toml"
+def test_loads_named_rules(root: Path) -> None:
+    config = load_config(write_config(root))
 
-            config = validate_repository_config(root=root, config_path=config_path)
+    assert config.config_version == 1
+    assert config.rules[0].id == "application"
 
-            assert config.rules[0].sources == ("src/",)
+
+@pytest.mark.parametrize(
+    ("content", "expected_message"),
+    [
+        (UNKNOWN_RULE_KEY, "`document`"),
+        (LEGACY_LAYOUT, "pre-1 `version`/`\\[\\[watch\\]\\]` configuration"),
+        (GLOB_DOCUMENT, "must be an exact"),
+    ],
+    ids=["unknown-rule-key", "legacy-layout", "glob-document"],
+)
+def test_rejects_invalid_config(
+    root: Path, content: str, expected_message: str
+) -> None:
+    path = root / "doc-sync.toml"
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ConfigError, match=expected_message):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "expected_message"),
+    [
+        (
+            "config_version = 1\n",
+            "config_version = 1\nunknown = true\n",
+            "unknown key",
+        ),
+        ('sources = ["src/"]', 'sources = ["src/", "./src/"]', "duplicate path"),
+        ('id = "application"', 'id = "Application"', "`id` must match"),
+    ],
+    ids=["unknown-root-key", "duplicate-source", "uppercase-id"],
+)
+def test_rejects_invalid_edit(
+    root: Path, original: str, replacement: str, expected_message: str
+) -> None:
+    path = write_config(root)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(original, replacement),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match=expected_message):
+        load_config(path)
+
+
+def test_repository_validation_checks_paths(repository: Path) -> None:
+    config = validate_repository_config(
+        root=repository, config_path=repository / "doc-sync.toml"
+    )
+
+    assert config.rules[0].sources == ("src/",)
+
+
+def test_repository_validation_reports_missing_paths(repository: Path) -> None:
+    path = repository / "doc-sync.toml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            'sources = ["src/"]', 'sources = ["absent/"]'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="does not point to an existing directory"):
+        validate_repository_config(root=repository, config_path=path)

@@ -15,7 +15,7 @@ classifiers = [
   "Topic :: Documentation",
   "Topic :: Software Development :: Quality Assurance",
 ]
-dependencies = []
+dependencies = ["pathspec>=0.12"]
 description = "Map changed source files to documentation review targets"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -27,8 +27,36 @@ version = "0.1.0a1"
 [project.scripts]
 doc-sync = "doc_sync.cli:main"
 
+# Upper bounds are deliberate: `ruff` selects ALL rules and `ty` treats every
+# rule as an error, so a minor release of either turns unrelated CI runs red.
+# `uv.lock` pins the exact versions; these bounds keep an unreviewed major or
+# minor bump from entering the lock during a routine `uv lock --upgrade`.
+[dependency-groups]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.14,<0.15",
+  "ty>=0.0.1a19,<0.1",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/doc_sync"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+markers = [
+  "posix_only: requires POSIX filesystem or permission semantics",
+]
+testpaths = ["tests"]
+xfail_strict = true
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:"]
+show_missing = true
+
+[tool.coverage.run]
+branch = true
+source = ["src/doc_sync"]
 
 [tool.ruff]
 line-length = 88
@@ -56,7 +84,11 @@ ignore = [
 select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D", "INP001", "PLR2004", "PT", "S101", "S603", "S607", "TC003"]
+# Each handler signature mirrors the argparse options of one subcommand, so its
+# argument count is set by the CLI surface rather than by the function.
+"src/doc_sync/cli.py" = ["PLR0913"]
+# `pytest.mark.parametrize` supplies its cases positionally, booleans included.
+"tests/**" = ["D", "FBT001", "INP001", "PLR2004", "S101", "S603", "S607", "TC003"]
 
 [tool.ruff.format]
 docstring-code-format = true

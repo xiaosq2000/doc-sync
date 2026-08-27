@@ -1,7 +1,7 @@
 # Installation
 
-Doc-sync requires Python 3.11 or newer and Git. It has no Python runtime
-dependencies.
+Doc-sync requires Python 3.11 or newer and Git. Its only Python runtime
+dependency is `pathspec`, which every install method below resolves for you.
 
 The [README](../README.md#install) covers the recommended one-line installs
 (`uv`, `pipx`, `pixi`). This guide covers source checkouts, virtual
@@ -38,20 +38,14 @@ doc-sync --help
 On PowerShell, activate that environment with `.venv\Scripts\Activate.ps1`
 instead.
 
-To run doc-sync without installing it, use the source launcher:
+To run doc-sync from a checkout without installing it:
 
 ```bash
-python3 bin/doc-sync --help
+uv run doc-sync --help
 ```
 
-For package development, use an editable virtual-environment installation:
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install --editable .
-doc-sync --help
-```
+For package development, see [CONTRIBUTING.md](../CONTRIBUTING.md); `uv sync
+--all-groups` sets up an editable install alongside the test and lint tools.
 
 ## Upgrade
 
@@ -68,6 +62,11 @@ For a virtual environment, use `python -m pip install --upgrade .`.
 Upgrading does not rewrite agent wiring. Re-run `doc-sync hook install all` if a
 release changes the generated hook command; the installer updates existing
 doc-sync wiring in place rather than appending a second entry.
+
+Re-running it is required after upgrading from a version that wired hooks
+through `bin/doc-sync`. Those commands looked like
+`python3 "$CLAUDE_PROJECT_DIR/bin/doc-sync" hook claude`; the launcher no longer
+exists, and every integration now invokes the installed `doc-sync` command.
 
 ## Uninstall
 
