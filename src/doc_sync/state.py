@@ -16,11 +16,33 @@ if TYPE_CHECKING:
     from doc_sync.model import Evaluation
 
 STATE_VERSION = 1
+DISABLED_MARKER = "disabled"
+_DISABLED_NOTE = (
+    "doc-sync is switched off for this checkout.\n"
+    "Remove this file, or run `doc-sync enable`, to switch it back on.\n"
+)
 
 
 def default_state_directory(root: Path) -> Path:
     """Return the worktree-aware Git metadata directory for state."""
     return git_metadata_path(root, "doc-sync")
+
+
+def is_disabled(state_directory: Path) -> bool:
+    """Report whether doc-sync is switched off for this checkout."""
+    return (state_directory / DISABLED_MARKER).exists()
+
+
+def set_disabled(state_directory: Path, *, disabled: bool) -> bool:
+    """Switch doc-sync off or on, returning true when the state changed."""
+    marker = state_directory / DISABLED_MARKER
+    if disabled == marker.exists():
+        return False
+    if disabled:
+        atomic_write(marker, _DISABLED_NOTE)
+    else:
+        marker.unlink(missing_ok=True)
+    return True
 
 
 def _session_path(state_directory: Path, session_id: str) -> Path:

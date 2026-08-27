@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from doc_sync.engine import evaluate
-from doc_sync.state import AcknowledgementStore
+from doc_sync.state import AcknowledgementStore, is_disabled, set_disabled
 from tests.support import APPLICATION_RULE
 
 if TYPE_CHECKING:
@@ -58,3 +58,37 @@ def test_changed_source_prompts_again(
     (root / "src/app.py").write_text("v2", encoding="utf-8")
 
     assert _prompted(store, root, "src/app.py")
+
+
+def test_an_absent_state_directory_reads_as_enabled(root: Path) -> None:
+    assert not is_disabled(root / "state")
+
+
+def test_the_switch_round_trips(root: Path) -> None:
+    directory = root / "state"
+
+    assert set_disabled(directory, disabled=True)
+    assert is_disabled(directory)
+
+    assert set_disabled(directory, disabled=False)
+    assert not is_disabled(directory)
+
+
+def test_setting_the_current_state_reports_no_change(root: Path) -> None:
+    directory = root / "state"
+
+    assert not set_disabled(directory, disabled=False)
+    assert set_disabled(directory, disabled=True)
+    assert not set_disabled(directory, disabled=True)
+
+
+def test_the_switch_is_independent_of_acknowledgement_state(
+    uncommitted_repository: Path, store: AcknowledgementStore
+) -> None:
+    root = uncommitted_repository
+    assert _prompted(store, root, "src/app.py")
+
+    set_disabled(store.state_directory, disabled=True)
+    set_disabled(store.state_directory, disabled=False)
+
+    assert not _prompted(store, root, "src/app.py")

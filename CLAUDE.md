@@ -49,20 +49,22 @@ Each layer has a strict boundary — `evaluate()` is pure and must never touch G
 - **Model** (`model.py`) — frozen dataclasses: `Rule`, `Impact`, `Evaluation`, `Status`. All other layers depend on these.
 - **Paths** (`paths.py`) — path normalization and `SourcePattern` matching, backed by `pathspec`'s `GitIgnoreBasicPattern`. Every pattern is compiled with a leading `/`, which anchors it to the repository root; matching at any depth is opt-in via an explicit `**/` prefix. This reproduces the semantics of the hand-rolled matcher it replaced, so configurations did not have to change. Anchoring also makes a leading `!` or `#` an ordinary character rather than gitignore negation or a comment. Do not drop the anchoring without treating it as a breaking config change.
 - **Engine** (`engine.py`) — `evaluate(rules, changed_paths) -> Evaluation`. Pure function, no side effects. This is the public API.
-- **Config** (`config.py`) — loads and validates `doc-sync.toml`. Structural validation via `load_config()`, repository-aware validation via `validate_repository_config()` (checks that paths/globs resolve).
+- **Config** (`config.py`) — loads and validates `doc-sync.toml`. Structural validation via `load_config()`, repository-aware validation via `validate_repository_config()` (checks that paths/globs resolve). `MissingConfigError` is a `ConfigError` subclass raised only when the file is absent; agent adapters catch it to stay silent in a repository that never opted in, while every other `ConfigError` still blocks.
 - **Git** (`git.py`) — discovers repo root, resolves changed paths (worktree, staged, merge-base, or explicit file lists). All Git calls go through `_run_git()` which shells out to `git`.
-- **State** (`state.py`) — per-session acknowledgement tracking under Git metadata (`git rev-parse --git-path doc-sync`). Uses content-hashing so the same reminder fires only once per distinct source/document/config state.
+- **State** (`state.py`) — per-session acknowledgement tracking under Git metadata (`git rev-parse --git-path doc-sync`). Uses content-hashing so the same reminder fires only once per distinct source/document/config state. The same directory holds the `disabled` marker (`is_disabled()` / `set_disabled()`), which is the per-checkout on/off switch — deliberately independent of `state_key()`, so toggling does not disturb acknowledgements.
 - **Render** (`render.py`) — builds human/agent-facing review messages from an `Evaluation`.
-- **CLI** (`cli.py`) — wires layers together via argparse subcommands: `check`, `validate`, `init`, `hook`. `main()` unpacks the parsed `Namespace` into the selected handler's keyword parameters, so every argparse `dest` must match a parameter name on its handler and handlers never receive a `Namespace`.
+- **CLI** (`cli.py`) — wires layers together via argparse subcommands: `check`, `validate`, `init`, `disable`, `enable`, `status`, `hook`. `main()` unpacks the parsed `Namespace` into the selected handler's keyword parameters, so every argparse `dest` must match a parameter name on its handler and handlers never receive a `Namespace`. `disable` and `enable` share `_run_toggle` through `set_defaults(disabled=...)`. `_run_check` and `_hook_evaluation` consult the disabled marker *before* loading config, so a switched-off checkout is quiet even when its config is broken.
 - **Integrations** (`integrations/`) — agent-specific adapters:
   - `stop_hook.py` — shared Stop-hook protocol for Claude Code and Codex CLI (JSON stdin/stdout with `decision: "block"`).
   - `install.py` — conservative install/uninstall of hooks into `.claude/settings.json`, `.codex/hooks.json`, and `.opencode/plugins/doc-sync.ts`. Manages only its own entries; preserves everything else.
 
 ### Exit codes
 
-- `0` — pass (no review needed), or hook ran successfully
+- `0` — pass (no review needed), doc-sync is disabled for this checkout, or hook ran successfully
 - `1` — configuration or operational error
 - `2` — documents need review
+
+A disabled checkout and a missing config both print nothing: "invisible to the agent" is the requirement, so hook adapters return `0` with empty stdout rather than emitting any envelope. `check --format json` is the one exception — it reports `{"status": "disabled", ...}`, keeping `Evaluation.to_dict()`'s key set. Do not add a `DISABLED` member to `Status`; `Evaluation.status` must stay a pure function of `impacts`.
 
 ### Testing
 

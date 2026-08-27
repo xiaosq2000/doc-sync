@@ -8,6 +8,12 @@ released.
 
 ### Changed
 
+- Agent hooks now stay silent in a repository holding no `doc-sync.toml`. Such a
+  repository never opted in, so reporting a missing configuration on every turn
+  only spent the agent's context. A malformed or otherwise invalid
+  configuration still blocks with an explanation, and `doc-sync check` still
+  exits `1` for either. Anyone who relied on the old blocking message as a
+  reminder to run `doc-sync init` will no longer see it.
 - **Breaking.** Removed the `bin/doc-sync` source launcher, along with the hook
   commands that invoked it through `python3`. Every integration now invokes the
   installed `doc-sync` command. Run `doc-sync hook install all` once after
@@ -34,6 +40,13 @@ released.
 
 ### Added
 
+- Add `doc-sync disable`, `doc-sync enable`, and `doc-sync status` to switch the
+  tool off for one checkout. The switch is a marker file beside the
+  acknowledgement state under `git rev-parse --git-path doc-sync`, so it is
+  never committed, never enters the worktree, and never reaches a fresh CI
+  clone. While disabled, `check` and every agent adapter exit `0` and print
+  nothing; `validate`, `init`, and `hook install`/`uninstall` are unaffected.
+  `doc-sync check --format json` reports `"status": "disabled"`.
 - Extract a pure source-to-documentation impact engine.
 - Add strict, named `config_version = 1` rules.
 - Add worktree, staged, merge-base, and explicit path inputs.
