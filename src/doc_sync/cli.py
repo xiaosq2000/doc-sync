@@ -10,6 +10,7 @@ from pathlib import Path
 
 from doc_sync.config import (
     CONFIG_FILENAME,
+    MissingConfigError,
     load_config,
     validate_repository_config,
 )
@@ -24,10 +25,18 @@ from doc_sync.git import (
 from doc_sync.integrations.stop_hook import blocking_output, parse_context
 from doc_sync.model import Evaluation, Status
 from doc_sync.render import REVIEW_GUIDANCE, build_review_message
-from doc_sync.state import AcknowledgementStore, default_state_directory
+from doc_sync.state import (
+    AcknowledgementStore,
+    default_state_directory,
+    is_disabled,
+    set_disabled,
+)
 
 EXIT_ERROR = 1
 EXIT_REVIEW_REQUIRED = 2
+# Same key set as `Evaluation.to_dict()`, so a disabled checkout does not change
+# the shape a `--format json` consumer has to parse.
+_DISABLED_PAYLOAD = {"status": "disabled", "review_targets": [], "impacts": []}
 # Parser bookkeeping that names a handler rather than one of its parameters.
 _DISPATCH_KEYS = frozenset({"command", "handler", "hook_command"})
 
@@ -59,16 +68,31 @@ def _json_output(value: object) -> None:
     sys.stdout.write("\n")
 
 
+def _state_directory(root: Path, raw_state_directory: str | None) -> Path:
+    return (
+        _path_from_root(root, raw_state_directory)
+        if raw_state_directory
+        else default_state_directory(root)
+    )
+
+
 def _run_check(
     *,
     root: str | None,
     config_path: str,
+    state_directory: str | None,
     staged: bool,
     base: str | None,
     paths_from: str | None,
     output_format: str,
 ) -> int:
     repository = resolve_root(root)
+    # Check the switch before the configuration: a disabled checkout stays quiet
+    # even when its `doc-sync.toml` is missing or broken.
+    if is_disabled(_state_directory(repository, state_directory)):
+        if output_format == "json":
+            _json_output(_DISABLED_PAYLOAD)
+        return 0
     config = load_config(_path_from_root(repository, config_path))
     result = evaluate(
         config.rules,
@@ -105,23 +129,17 @@ def _run_init(*, root: str | None, dry_run: bool) -> int:
     return 0
 
 
-def _state_store(root: Path, raw_state_directory: str | None) -> AcknowledgementStore:
-    directory = (
-        _path_from_root(root, raw_state_directory)
-        if raw_state_directory
-        else default_state_directory(root)
-    )
-    return AcknowledgementStore(directory)
-
-
 def _hook_evaluation(
     *, root: Path, config_path: str, state_directory: str | None, session_id: str
 ) -> Evaluation | None:
     """Evaluate the worktree, returning it only when this session must be prompted."""
+    directory = _state_directory(root, state_directory)
+    if is_disabled(directory):
+        return None
     resolved = _path_from_root(root, config_path)
     config = load_config(resolved)
     result = evaluate(config.rules, changed_worktree_paths(root))
-    store = _state_store(root, state_directory)
+    store = AcknowledgementStore(directory)
     if result.status is Status.PASS:
         store.clear(session_id)
         return None
@@ -160,6 +178,10 @@ def _run_stop_hook(
         )
         if result is not None:
             _json_output(blocking_output(build_review_message(result)))
+    except MissingConfigError:
+        # A repository holding no configuration never opted in, so saying so on
+        # every turn would only spend the agent's context.
+        return 0
     except (DocSyncError, OSError) as exc:
         _json_output(blocking_output(f"doc-sync could not complete its check: {exc}"))
     return 0
@@ -172,16 +194,38 @@ def _run_opencode_hook(
     state_directory: str | None,
     session_id: str,
 ) -> int:
-    result = _hook_evaluation(
-        root=resolve_root(root),
-        config_path=config_path,
-        state_directory=state_directory,
-        session_id=session_id,
-    )
+    try:
+        result = _hook_evaluation(
+            root=resolve_root(root),
+            config_path=config_path,
+            state_directory=state_directory,
+            session_id=session_id,
+        )
+    except MissingConfigError:
+        return 0
     if result is None:
         return 0
     _json_output({**result.to_dict(), "message": build_review_message(result)})
     return EXIT_REVIEW_REQUIRED
+
+
+def _run_toggle(
+    *, root: str | None, state_directory: str | None, disabled: bool
+) -> int:
+    repository = resolve_root(root)
+    state = "disabled" if disabled else "enabled"
+    if set_disabled(_state_directory(repository, state_directory), disabled=disabled):
+        print(f"doc-sync {state} for {repository}")
+    else:
+        print(f"doc-sync is already {state} for {repository}")
+    return 0
+
+
+def _run_status(*, root: str | None, state_directory: str | None) -> int:
+    repository = resolve_root(root)
+    disabled = is_disabled(_state_directory(repository, state_directory))
+    print(f"doc-sync is {'disabled' if disabled else 'enabled'} for {repository}")
+    return 0
 
 
 INTEGRATIONS = ("claude", "codex", "opencode")
@@ -226,6 +270,10 @@ def _add_repository_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_state_directory_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--state-directory")
+
+
 def _add_stop_hook_arguments(
     parser: argparse.ArgumentParser,
     *,
@@ -233,7 +281,7 @@ def _add_stop_hook_arguments(
     project_directory_variable: str | None,
 ) -> None:
     _add_repository_arguments(parser)
-    parser.add_argument("--state-directory")
+    _add_state_directory_argument(parser)
     parser.set_defaults(
         handler=_run_stop_hook,
         agent=agent,
@@ -250,6 +298,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     check = subparsers.add_parser("check", help="Evaluate changed paths.")
     _add_repository_arguments(check)
+    _add_state_directory_argument(check)
     source = check.add_mutually_exclusive_group()
     source.add_argument("--staged", action="store_true", help="Check staged paths.")
     source.add_argument("--base", help="Check committed paths changed since this ref.")
@@ -278,7 +327,30 @@ def _build_parser() -> argparse.ArgumentParser:
     initialize.add_argument("--dry-run", action="store_true")
     initialize.set_defaults(handler=_run_init)
 
-    hook = subparsers.add_parser("hook", help="Run or manage agent hooks.")
+    disable = subparsers.add_parser(
+        "disable", help="Switch doc-sync off for this checkout."
+    )
+    _add_root_argument(disable)
+    _add_state_directory_argument(disable)
+    disable.set_defaults(handler=_run_toggle, disabled=True)
+
+    enable = subparsers.add_parser(
+        "enable", help="Switch doc-sync back on for this checkout."
+    )
+    _add_root_argument(enable)
+    _add_state_directory_argument(enable)
+    enable.set_defaults(handler=_run_toggle, disabled=False)
+
+    status = subparsers.add_parser("status", help="Report whether doc-sync is on.")
+    _add_root_argument(status)
+    _add_state_directory_argument(status)
+    status.set_defaults(handler=_run_status)
+
+    _add_hook_commands(subparsers.add_parser("hook", help="Run or manage agent hooks."))
+    return parser
+
+
+def _add_hook_commands(hook: argparse.ArgumentParser) -> None:
     hook_subparsers = hook.add_subparsers(dest="hook_command", required=True)
 
     claude = hook_subparsers.add_parser("claude", help="Run the Claude Stop adapter.")
@@ -296,7 +368,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_repository_arguments(opencode)
     opencode.add_argument("--session-id", required=True)
-    opencode.add_argument("--state-directory")
+    _add_state_directory_argument(opencode)
     opencode.set_defaults(handler=_run_opencode_hook)
 
     install = hook_subparsers.add_parser("install", help="Install agent hooks.")
@@ -311,7 +383,6 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_root_argument(uninstall)
     uninstall.add_argument("--dry-run", action="store_true")
     uninstall.set_defaults(handler=_run_hook_uninstall)
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -11,6 +11,14 @@ from doc_sync.cli import main
 if TYPE_CHECKING:
     from pathlib import Path
 
+BROKEN_CONFIG = """config_version = 1
+[[rules
+"""
+
+
+def _stop_hook_payload(root: Path, session_id: str = "session-1") -> str:
+    return json.dumps({"session_id": session_id, "cwd": str(root)})
+
 
 def test_json_check_uses_stable_status_and_exit_code(
     repository: Path, capsys: pytest.CaptureFixture[str]
@@ -80,22 +88,139 @@ def test_codex_adapter_resolves_the_repository_from_the_payload_cwd(
     assert "README.md" in response["reason"]
 
 
+# A repository holding no `doc-sync.toml` never opted in, so its hooks must add
+# nothing at all to the agent's context.
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_stop_adapters_stay_silent_without_a_configuration(
+    empty_repository: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    agent: str,
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO(_stop_hook_payload(empty_repository)))
+
+    exit_code = main(["hook", agent, "--root", str(empty_repository)])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_opencode_adapter_stays_silent_without_a_configuration(
+    empty_repository: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    exit_code = main(
+        ["hook", "opencode", "--root", str(empty_repository), "--session-id", "one"]
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == ""
+
+
+# A broken configuration is a real mistake, so it keeps blocking loudly.
 def test_stop_hook_config_error_is_structured_blocking_json(
     empty_repository: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = json.dumps({"session_id": "session-1", "cwd": str(empty_repository)})
-    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+    (empty_repository / "doc-sync.toml").write_text(BROKEN_CONFIG, encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO(_stop_hook_payload(empty_repository)))
 
     exit_code = main(["hook", "claude", "--root", str(empty_repository)])
 
     response = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert response["decision"] == "block"
-    assert "configuration file does not exist" in response["reason"]
+    assert "TOML parse error" in response["reason"]
 
 
+@pytest.mark.parametrize("agent", ["claude", "codex"])
+def test_disabling_silences_the_stop_adapters(
+    repository: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    agent: str,
+) -> None:
+    (repository / "src/app.py").write_text("v2", encoding="utf-8")
+    state = ["--root", str(repository), "--state-directory", str(repository / "state")]
+    hook = ["hook", agent, *state]
+    main(["disable", *state])
+    capsys.readouterr()
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(_stop_hook_payload(repository)))
+    disabled_exit = main(hook)
+    disabled_output = capsys.readouterr().out
+
+    main(["enable", *state])
+    capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", io.StringIO(_stop_hook_payload(repository)))
+    enabled_exit = main(hook)
+    enabled_output = capsys.readouterr().out
+
+    assert disabled_exit == 0
+    assert disabled_output == ""
+    assert enabled_exit == 0
+    assert json.loads(enabled_output)["decision"] == "block"
+
+
+def test_disabling_silences_the_opencode_adapter(
+    repository: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (repository / "src/app.py").write_text("v2", encoding="utf-8")
+    state = ["--root", str(repository), "--state-directory", str(repository / "state")]
+    main(["disable", *state])
+    capsys.readouterr()
+
+    exit_code = main(["hook", "opencode", *state, "--session-id", "one"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_output"),
+    [([], ""), (["--format", "json"], '{"impacts": [], "review_targets": [], ')],
+    ids=["human", "json"],
+)
+def test_disabling_passes_check_without_a_review(
+    repository: Path,
+    capsys: pytest.CaptureFixture[str],
+    arguments: list[str],
+    expected_output: str,
+) -> None:
+    (repository / "src/app.py").write_text("v2", encoding="utf-8")
+    state = ["--root", str(repository), "--state-directory", str(repository / "state")]
+    main(["disable", *state])
+    capsys.readouterr()
+
+    exit_code = main(["check", *state, *arguments])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert output.startswith(expected_output)
+    if arguments:
+        assert json.loads(output)["status"] == "disabled"
+
+
+def test_toggle_reports_the_state_and_whether_it_changed(
+    repository: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = ["--root", str(repository), "--state-directory", str(repository / "state")]
+
+    assert main(["status", *state]) == 0
+    assert "is enabled" in capsys.readouterr().out
+
+    assert main(["disable", *state]) == 0
+    assert "doc-sync disabled for" in capsys.readouterr().out
+
+    assert main(["disable", *state]) == 0
+    assert "is already disabled" in capsys.readouterr().out
+
+    assert main(["status", *state]) == 0
+    assert "is disabled" in capsys.readouterr().out
+
+
+# Only the agent adapters go quiet for a missing configuration; an explicit
+# `check` still reports the problem.
 def test_operational_error_uses_stderr_and_exit_one(
     root: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

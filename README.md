@@ -31,6 +31,7 @@ doc-sync init                    # create doc-sync.toml with starter rules
 doc-sync validate --check-paths  # verify paths exist in the repo
 doc-sync check                   # run the check
 doc-sync hook install claude     # wire a Stop hook for Claude Code
+doc-sync disable                 # switch it off here; `enable` switches it back
 ```
 
 ## Install
@@ -100,6 +101,11 @@ is opt-in through an explicit `**/` prefix: `app.py` is the root file, while
 Documents are exact file paths — doc-sync intentionally does not accept document
 globs because its output should identify concrete review targets.
 
+A repository holding no `doc-sync.toml` has not opted in, so its agent hooks stay
+silent rather than reporting the absence on every turn. Run `doc-sync init` to
+opt in. An invalid configuration is a different matter and still blocks with an
+explanation.
+
 ## Validation
 
 Structural validation catches malformed TOML, unknown fields, unsupported
@@ -133,8 +139,8 @@ git diff --name-only -z HEAD^ | tr '\0' '\n' | doc-sync check --paths-from -
 ```
 
 Use `--format json` for machine-readable output. Exit code `0` means no review
-is needed; `2` means documents should be reviewed; `1` signals a configuration
-or operational error.
+is needed — or that doc-sync is switched off here; `2` means documents should be
+reviewed; `1` signals a configuration or operational error.
 
 ## Agent hooks
 
@@ -171,6 +177,32 @@ A review reminder fires once per agent session and relevant source/document
 state. State lives under `git rev-parse --git-path doc-sync` — nothing is added
 to the repository or `.gitignore`. Changing a matched source, document, rule, or
 configuration triggers a new reminder; unrelated dirty files do not.
+
+### Switching doc-sync off
+
+To quiet doc-sync for a while without touching your agent configuration:
+
+```bash
+doc-sync disable
+doc-sync status    # doc-sync is disabled for /path/to/repo
+doc-sync enable
+```
+
+While disabled, `doc-sync check` and every agent hook exit `0` and print nothing
+at all — a disabled checkout costs an agent zero context on every turn.
+`doc-sync check --format json` reports `"status": "disabled"` for scripts that
+need to tell the two apart. `validate`, `init`, and `hook install`/`uninstall`
+ignore the switch, so you can still lint your configuration and manage wiring
+while it is off.
+
+The switch is a marker file beside the acknowledgement state, under
+`git rev-parse --git-path doc-sync`. It is local to one checkout: nothing is
+committed, nothing enters your working tree, and a fresh clone — including the
+one your CI makes — is always enabled. Like the acknowledgement state, it is
+scoped to a single worktree, so a linked worktree carries its own switch.
+
+To remove the integration outright rather than quiet it, use
+`doc-sync hook uninstall`.
 
 ## License
 

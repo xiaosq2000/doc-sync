@@ -34,6 +34,15 @@ class ConfigError(DocSyncError, ValueError):
     """Raised when the doc-sync configuration is invalid."""
 
 
+class MissingConfigError(ConfigError):
+    """Raised when no doc-sync configuration exists at the expected path.
+
+    Agent adapters treat this apart from every other `ConfigError`: a repository
+    holding no configuration never opted in, so its hooks stay silent instead of
+    reporting a mistake on every turn.
+    """
+
+
 @dataclass(frozen=True)
 class Config:
     """Validated doc-sync configuration."""
@@ -104,7 +113,7 @@ def _parse_rule(config_path: Path, index: int, raw_rule_value: object) -> Rule:
 def load_config(config_path: Path) -> Config:
     """Load and fully validate a doc-sync TOML configuration."""
     if not config_path.is_file():
-        raise ConfigError(f"{config_path}: configuration file does not exist")
+        raise MissingConfigError(f"{config_path}: configuration file does not exist")
     try:
         with config_path.open("rb") as config_file:
             raw_config = tomllib.load(config_file)

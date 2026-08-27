@@ -74,6 +74,10 @@ Doc-sync writes to three places: the agent wiring it manages, the repository's
 own `doc-sync.toml`, and per-session state under Git metadata. Remove the wiring
 first, while the command is still installed.
 
+To quiet doc-sync in one repository without uninstalling anything, run
+`doc-sync disable` there instead; see
+[Switching doc-sync off](../README.md#switching-doc-sync-off).
+
 ### 1. Remove the managed agent wiring
 
 Run this inside every repository that has an integration installed:
@@ -114,8 +118,9 @@ rm -rf "$(git rev-parse --git-path doc-sync)"
 Both forms resolve from anywhere inside the repository. The state path is also
 worktree-aware — `.git/doc-sync` in a primary worktree and
 `.git/worktrees/<name>/doc-sync` in a linked one — so repeat the second command
-in each worktree that ran an agent hook. Neither path is tracked, so nothing
-needs to be committed.
+in each worktree that ran an agent hook. Removing that directory also clears the
+`disabled` marker written by `doc-sync disable`. Neither path is tracked, so
+nothing needs to be committed.
 
 If `.claude/settings.json`, `.codex/hooks.json`, or `.opencode/` existed only
 for doc-sync, they may now be empty and can be removed as well. Codex keeps its
