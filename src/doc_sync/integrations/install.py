@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
@@ -30,10 +29,8 @@ CODEX_TRUST_NOTICE = (
     "Codex runs a project hook only after you trust it: open Codex in this "
     "repository and run `/hooks` to review the doc-sync entry."
 )
-# Agent hooks run in a non-interactive shell, where `python` is frequently
-# absent or only a login-shell alias. `python3` is the name POSIX installs.
-SOURCE_INTERPRETER = "python3"
-_SAFE_RELATIVE_LAUNCHER = re.compile(r"^[A-Za-z0-9_./-]+$")
+CLAUDE_COMMAND = 'doc-sync hook claude --root "$CLAUDE_PROJECT_DIR"'
+CODEX_COMMAND = "doc-sync hook codex"
 
 
 class InstallError(DocSyncError, RuntimeError):
@@ -52,53 +49,11 @@ def _resource_text(name: str) -> str:
     return files("doc_sync.resources").joinpath(name).read_text(encoding="utf-8")
 
 
-def _source_launcher() -> Path:
-    return Path(__file__).resolve().parents[3] / "bin" / "doc-sync"
-
-
-def _relative_source_launcher(root: Path) -> str | None:
-    launcher = _source_launcher()
-    try:
-        relative = launcher.relative_to(root).as_posix()
-    except ValueError:
-        return None
-    return relative if _SAFE_RELATIVE_LAUNCHER.fullmatch(relative) else None
-
-
-def _claude_command(root: Path) -> str:
-    relative = _relative_source_launcher(root)
-    if relative is None:
-        return 'doc-sync hook claude --root "$CLAUDE_PROJECT_DIR"'
-    return (
-        f'{SOURCE_INTERPRETER} "$CLAUDE_PROJECT_DIR/{relative}" hook claude '
-        '--root "$CLAUDE_PROJECT_DIR"'
+def _opencode_invocation() -> str:
+    invocation = (
+        "        await shell`doc-sync hook opencode --root ${worktree} "
+        "--session-id ${sessionID}`"
     )
-
-
-def _codex_command(root: Path) -> str:
-    relative = _relative_source_launcher(root)
-    if relative is None:
-        return "doc-sync hook codex"
-    # Codex exposes no project-directory variable and runs hooks from the
-    # session working directory, which may be any directory in the repository,
-    # so the launcher is located from the worktree Git itself reports.
-    return (
-        f'{SOURCE_INTERPRETER} "$(git rev-parse --show-toplevel)/{relative}" hook codex'
-    )
-
-
-def _opencode_invocation(root: Path) -> str:
-    relative = _relative_source_launcher(root)
-    if relative is None:
-        invocation = (
-            "        await shell`doc-sync hook opencode --root ${worktree} "
-            "--session-id ${sessionID}`"
-        )
-    else:
-        invocation = (
-            f"        await shell`{SOURCE_INTERPRETER} ${{worktree}}/{relative} "
-            "hook opencode --root ${worktree} --session-id ${sessionID}`"
-        )
     return (
         f"      const result =\n{invocation}\n          .quiet()\n          .nothrow();"
     )
@@ -138,7 +93,7 @@ class StopHookFile:
 def _claude_stop_hook(root: Path) -> StopHookFile:
     return StopHookFile(
         path=root / CLAUDE_SETTINGS,
-        command=_claude_command(root),
+        command=CLAUDE_COMMAND,
         subcommand="hook claude",
         legacy=True,
     )
@@ -147,7 +102,7 @@ def _claude_stop_hook(root: Path) -> StopHookFile:
 def _codex_stop_hook(root: Path) -> StopHookFile:
     return StopHookFile(
         path=root / CODEX_HOOKS,
-        command=_codex_command(root),
+        command=CODEX_COMMAND,
         subcommand="hook codex",
     )
 
@@ -249,7 +204,7 @@ def _prepare_opencode_install(root: Path, *, force: bool) -> PlannedWrite | None
                 f"{path} is not managed by doc-sync; pass `--force` to replace it"
             )
     content = _resource_text("opencode-plugin.ts").replace(
-        "      // __DOC_SYNC_INVOCATION__", _opencode_invocation(root)
+        "      // __DOC_SYNC_INVOCATION__", _opencode_invocation()
     )
     if path.exists() and path.read_text(encoding="utf-8") == content:
         return None

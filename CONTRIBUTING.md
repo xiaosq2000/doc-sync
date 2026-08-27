@@ -6,23 +6,36 @@ paths or repository contents before posting logs.
 
 ## Development setup
 
-Doc-sync requires Python 3.11 or newer and has no runtime dependencies.
+Doc-sync requires Python 3.11 or newer, Git, and [uv](https://docs.astral.sh/uv/).
+Its only runtime dependency is `pathspec`.
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install --editable .
-python -m pip install ruff ty
+uv sync --all-groups
 ```
 
-Run the checks before opening a pull request:
+That creates `.venv`, installs doc-sync in editable mode, and installs the
+development tools pinned in `uv.lock`. Run the checks before opening a pull
+request:
 
 ```bash
-python -m unittest discover -s tests -v
-ruff check .
-ruff format --check .
-ty check
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
 ```
+
+Useful variations:
+
+```bash
+uv run pytest tests/unit/test_engine.py       # one file
+uv run pytest -k "globstar"                   # one pattern
+uv run pytest --cov --cov-report=term-missing # with coverage
+```
+
+`ruff` selects every rule and `ty` treats every rule as an error, so both are
+version-pinned in `uv.lock`. Bump them deliberately with
+`uv lock --upgrade-package ruff --upgrade-package ty` and fix whatever the new
+release reports in the same commit.
 
 Changes to configuration behavior, JSON output, exit codes, or agent adapters
 must include contract tests and corresponding README updates.

@@ -1,18 +1,15 @@
-"""Shared temporary-repository helpers."""
+"""Shared repository helpers."""
 
 from __future__ import annotations
 
 import subprocess
-import tempfile
-from contextlib import contextmanager
 from dataclasses import replace
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from doc_sync.model import Rule
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from pathlib import Path
 
 # The rule every fixture repository is built around. `write_config` renders its
 # TOML from this object so the config and the expected Rule cannot drift apart.
@@ -58,24 +55,3 @@ def write_config(root: Path, *, document: str = "README.md") -> Path:
     rule = replace(APPLICATION_RULE, documents=(document,))
     path.write_text(render_config(rule), encoding="utf-8")
     return path
-
-
-@contextmanager
-def temporary_root() -> Iterator[Path]:
-    """Yield an empty temporary directory as a repository root."""
-    with tempfile.TemporaryDirectory() as directory:
-        yield Path(directory)
-
-
-@contextmanager
-def temporary_repository(*, commit: bool = True) -> Iterator[Path]:
-    """Yield a Git repository holding the source, document, and config of APPLICATION_RULE."""
-    with temporary_root() as root:
-        initialize_repository(root)
-        (root / "src").mkdir()
-        (root / "src/app.py").write_text("v1", encoding="utf-8")
-        (root / "README.md").write_text("docs", encoding="utf-8")
-        write_config(root)
-        if commit:
-            commit_all(root)
-        yield root

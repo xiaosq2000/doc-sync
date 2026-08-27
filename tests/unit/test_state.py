@@ -1,86 +1,60 @@
 from __future__ import annotations
 
-import unittest
+from typing import TYPE_CHECKING
+
+import pytest
 
 from doc_sync.engine import evaluate
 from doc_sync.state import AcknowledgementStore
-from tests.support import APPLICATION_RULE, temporary_repository
+from tests.support import APPLICATION_RULE
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
-class AcknowledgementStoreTest(unittest.TestCase):
-    def test_acknowledges_each_session_independently(self) -> None:
-        with temporary_repository(commit=False) as root:
-            config_path = root / "doc-sync.toml"
-            result = evaluate(
-                (APPLICATION_RULE,),
-                ("src/app.py",),
-            )
-            store = AcknowledgementStore(root / "state")
+@pytest.fixture
+def store(uncommitted_repository: Path) -> AcknowledgementStore:
+    return AcknowledgementStore(uncommitted_repository / "state")
 
-            assert store.should_prompt(
-                session_id="one",
-                root=root,
-                config_path=config_path,
-                evaluation=result,
-            )
-            assert not store.should_prompt(
-                session_id="one",
-                root=root,
-                config_path=config_path,
-                evaluation=result,
-            )
-            assert store.should_prompt(
-                session_id="two",
-                root=root,
-                config_path=config_path,
-                evaluation=result,
-            )
 
-    def test_unrelated_file_does_not_change_state(self) -> None:
-        with temporary_repository(commit=False) as root:
-            config_path = root / "doc-sync.toml"
-            result = evaluate(
-                (APPLICATION_RULE,),
-                ("src/app.py", "notes.txt"),
-            )
-            store = AcknowledgementStore(root / "state")
-            assert store.should_prompt(
-                session_id="one",
-                root=root,
-                config_path=config_path,
-                evaluation=result,
-            )
+def _prompted(store: AcknowledgementStore, root: Path, *changed: str) -> bool:
+    return store.should_prompt(
+        session_id="one",
+        root=root,
+        config_path=root / "doc-sync.toml",
+        evaluation=evaluate((APPLICATION_RULE,), changed),
+    )
 
-            (root / "notes.txt").write_text("unrelated", encoding="utf-8")
 
-            assert not store.should_prompt(
-                session_id="one",
-                root=root,
-                config_path=config_path,
-                evaluation=result,
-            )
+def test_acknowledges_each_session_independently(
+    uncommitted_repository: Path, store: AcknowledgementStore
+) -> None:
+    root = uncommitted_repository
+    evaluation = evaluate((APPLICATION_RULE,), ("src/app.py",))
+    arguments = {"root": root, "config_path": root / "doc-sync.toml"}
 
-    def test_changed_source_prompts_again(self) -> None:
-        with temporary_repository(commit=False) as root:
-            source = root / "src/app.py"
-            config_path = root / "doc-sync.toml"
-            result = evaluate(
-                (APPLICATION_RULE,),
-                ("src/app.py",),
-            )
-            store = AcknowledgementStore(root / "state")
-            assert store.should_prompt(
-                session_id="one",
-                root=root,
-                config_path=config_path,
-                evaluation=result,
-            )
+    assert store.should_prompt(session_id="one", evaluation=evaluation, **arguments)
+    assert not store.should_prompt(session_id="one", evaluation=evaluation, **arguments)
+    assert store.should_prompt(session_id="two", evaluation=evaluation, **arguments)
 
-            source.write_text("v2", encoding="utf-8")
 
-            assert store.should_prompt(
-                session_id="one",
-                root=root,
-                config_path=config_path,
-                evaluation=result,
-            )
+def test_unrelated_file_does_not_change_state(
+    uncommitted_repository: Path, store: AcknowledgementStore
+) -> None:
+    root = uncommitted_repository
+    assert _prompted(store, root, "src/app.py", "notes.txt")
+
+    (root / "notes.txt").write_text("unrelated", encoding="utf-8")
+
+    assert not _prompted(store, root, "src/app.py", "notes.txt")
+
+
+def test_changed_source_prompts_again(
+    uncommitted_repository: Path, store: AcknowledgementStore
+) -> None:
+    root = uncommitted_repository
+    assert _prompted(store, root, "src/app.py")
+
+    (root / "src/app.py").write_text("v2", encoding="utf-8")
+
+    assert _prompted(store, root, "src/app.py")
