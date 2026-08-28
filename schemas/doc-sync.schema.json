@@ -2,60 +2,31 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/shuqixiao/doc-sync/main/schemas/doc-sync.schema.json",
   "title": "doc-sync configuration",
-  "description": "Maps changed repository sources to documents that require review.",
+  "description": "Maps exact document paths to source patterns that may affect them.",
   "type": "object",
-  "required": ["config_version", "rules"],
+  "required": ["documents"],
   "additionalProperties": false,
   "properties": {
-    "config_version": {
-      "description": "Configuration schema version.",
-      "const": 1
-    },
-    "rules": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": ["id", "sources", "documents"],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "description": "Stable identifier used in diagnostics and state.",
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]*$"
-          },
-          "sources": {
-            "description": "Repository-relative exact paths, directory prefixes, or glob patterns. Every pattern is anchored to the repository root; matching at any depth is opt-in through an explicit `**/` prefix.",
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "$ref": "#/$defs/relativePath"
-            }
-          },
-          "documents": {
-            "description": "Repository-relative exact documentation file paths.",
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "allOf": [
-                { "$ref": "#/$defs/relativePath" },
-                {
-                  "not": {
-                    "pattern": "[?*\\[]|/$"
-                  }
-                }
-              ]
-            }
-          }
-        }
+    "documents": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "allOf": [
+          { "$ref": "#/$defs/relativePath" },
+          { "not": { "pattern": "[?*\\[]|/$" } }
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "$ref": "#/$defs/relativePath" }
       }
     }
   },
   "$defs": {
     "relativePath": {
-      "description": "A repository-relative path holding no absolute prefix and no `.` or `..` segment.",
+      "description": "A non-empty repository-relative path without dot segments.",
       "type": "string",
       "minLength": 1,
       "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.{1,2}(?:/|$)).+"

@@ -83,17 +83,6 @@ def changed_base_paths(root: Path, base: str) -> tuple[str, ...]:
     )
 
 
-def repository_file_paths(root: Path) -> tuple[str, ...]:
-    """Return tracked and untracked non-ignored files."""
-    paths = _nul_paths(
-        _run_git(
-            root,
-            ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        )
-    )
-    return tuple(sorted(path for path in set(paths) if (root / path).is_file()))
-
-
 def git_metadata_path(root: Path, relative_path: str) -> Path:
     """Resolve a worktree-aware path inside Git metadata."""
     output = _run_git(root, ["rev-parse", "--git-path", relative_path])

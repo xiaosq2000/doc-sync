@@ -9,7 +9,7 @@ from pathspec.patterns.gitignore.basic import GitIgnoreBasicPattern
 
 def normalize_path(path: str, *, keep_trailing_slash: bool = False) -> str:
     """Normalize a repository-relative path to slash-separated form."""
-    normalized = path.strip().replace("\\", "/")
+    normalized = path.replace("\\", "/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
     while "//" in normalized:

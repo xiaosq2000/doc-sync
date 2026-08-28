@@ -1,4 +1,4 @@
-"""Per-session acknowledgement state for agent hooks."""
+"""Private acknowledgement and disable state for the Stop hook."""
 
 from __future__ import annotations
 
@@ -13,28 +13,28 @@ from doc_sync.git import git_metadata_path
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from doc_sync.model import Evaluation
+    from doc_sync.match import Review
 
 STATE_VERSION = 1
 DISABLED_MARKER = "disabled"
 _DISABLED_NOTE = (
-    "doc-sync is switched off for this checkout.\n"
-    "Remove this file, or run `doc-sync enable`, to switch it back on.\n"
+    "doc-sync is disabled for this checkout.\n"
+    "Run `doc-sync enable` to enable its Stop hook.\n"
 )
 
 
 def default_state_directory(root: Path) -> Path:
-    """Return the worktree-aware Git metadata directory for state."""
+    """Return the worktree-specific Git metadata directory for hook state."""
     return git_metadata_path(root, "doc-sync")
 
 
 def is_disabled(state_directory: Path) -> bool:
-    """Report whether doc-sync is switched off for this checkout."""
+    """Return whether the Stop hook is disabled for this checkout."""
     return (state_directory / DISABLED_MARKER).exists()
 
 
 def set_disabled(state_directory: Path, *, disabled: bool) -> bool:
-    """Switch doc-sync off or on, returning true when the state changed."""
+    """Set the Stop hook state and report whether it changed."""
     marker = state_directory / DISABLED_MARKER
     if disabled == marker.exists():
         return False
@@ -66,18 +66,13 @@ def _content_marker(path: Path) -> str:
         return f"error:{exc.__class__.__name__}"
 
 
-def state_key(*, root: Path, config_path: Path, evaluation: Evaluation) -> str:
-    """Fingerprint only the configuration and paths relevant to an evaluation."""
+def _state_key(*, root: Path, config_path: Path, reviews: tuple[Review, ...]) -> str:
     relevant_paths = sorted(
-        {
-            path
-            for impact in evaluation.impacts
-            for path in (*impact.matched_sources, *impact.review_targets)
-        }
+        {path for review in reviews for path in (review.document, *review.sources)}
     )
     payload = {
         "config": _content_marker(config_path),
-        "evaluation": evaluation.to_dict(),
+        "reviews": [review.to_dict() for review in reviews],
         "paths": [
             {"path": path, "content": _content_marker(root / path)}
             for path in relevant_paths
@@ -95,18 +90,11 @@ def _read_state(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def _write_state(path: Path, key: str) -> None:
-    payload = json.dumps(
-        {"version": STATE_VERSION, "state_key": key}, indent=2, sort_keys=True
-    )
-    atomic_write(path, payload + "\n")
-
-
 class AcknowledgementStore:
-    """Persist prompt acknowledgement independently for each agent session."""
+    """Remember the last review state shown in each agent session."""
 
     def __init__(self, state_directory: Path) -> None:
-        """Create a store rooted at a worktree-specific state directory."""
+        """Create a store in a worktree-specific state directory."""
         self.state_directory = state_directory
 
     def should_prompt(
@@ -115,11 +103,11 @@ class AcknowledgementStore:
         session_id: str,
         root: Path,
         config_path: Path,
-        evaluation: Evaluation,
+        reviews: tuple[Review, ...],
     ) -> bool:
-        """Return true once for each distinct session evaluation state."""
+        """Return true once for each distinct relevant content state."""
         path = _session_path(self.state_directory, session_id)
-        key = state_key(root=root, config_path=config_path, evaluation=evaluation)
+        key = _state_key(root=root, config_path=config_path, reviews=reviews)
         previous = _read_state(path)
         if (
             previous
@@ -127,7 +115,10 @@ class AcknowledgementStore:
             and previous.get("state_key") == key
         ):
             return False
-        _write_state(path, key)
+        content = json.dumps(
+            {"version": STATE_VERSION, "state_key": key}, indent=2, sort_keys=True
+        )
+        atomic_write(path, content + "\n")
         return True
 
     def clear(self, session_id: str) -> None:

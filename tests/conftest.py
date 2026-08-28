@@ -20,7 +20,7 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 
 def _populate(root: Path) -> None:
-    """Write the source, document, and configuration of `APPLICATION_RULE`."""
+    """Write the standard source, document, and configuration fixture."""
     (root / "src").mkdir()
     (root / "src/app.py").write_text("v1", encoding="utf-8")
     (root / "README.md").write_text("docs", encoding="utf-8")

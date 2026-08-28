@@ -1,1 +1,0 @@
-"""Packaged templates and schemas."""
