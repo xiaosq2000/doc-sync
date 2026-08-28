@@ -16,7 +16,7 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = ["pathspec>=0.12"]
-description = "Map changed source files to documentation review targets"
+description = "Find documents that may need review after source changes"
 license = "MIT"
 license-files = ["LICENSE"]
 name = "doc-sync"
@@ -84,9 +84,6 @@ ignore = [
 select = ["ALL"]
 
 [tool.ruff.lint.per-file-ignores]
-# Each handler signature mirrors the argparse options of one subcommand, so its
-# argument count is set by the CLI surface rather than by the function.
-"src/doc_sync/cli.py" = ["PLR0913"]
 # `pytest.mark.parametrize` supplies its cases positionally, booleans included.
 "tests/**" = ["D", "FBT001", "INP001", "PLR2004", "S101", "S603", "S607", "TC003"]
 

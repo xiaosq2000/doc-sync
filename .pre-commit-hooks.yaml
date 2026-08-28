@@ -1,7 +1,7 @@
 - id: doc-sync-validate
   name: validate doc-sync configuration
-  description: Validate doc-sync.toml structure and repository paths.
-  entry: doc-sync validate --check-paths
+  description: Validate doc-sync.toml and its document targets.
+  entry: doc-sync validate
   language: python
   pass_filenames: false
   always_run: true

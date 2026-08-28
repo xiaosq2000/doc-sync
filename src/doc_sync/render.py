@@ -1,36 +1,31 @@
-"""Human- and agent-facing rendering of an evaluation."""
+"""Render document review results for people and agents."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from doc_sync.model import Evaluation
+    from collections.abc import Iterable
 
-REVIEW_GUIDANCE = (
-    "Review each document above and update it when the source change affects "
+    from doc_sync.match import Review
+
+CHECK_GUIDANCE = (
+    "Review each document and update it if the listed source changes altered "
     "durable facts."
 )
-SESSION_GUIDANCE = (
-    f"{REVIEW_GUIDANCE}\n"
-    "If no update is needed, the same session may proceed after this review reminder."
+HOOK_GUIDANCE = (
+    f"{CHECK_GUIDANCE}\n"
+    "If no update is needed, stop again without changing the document."
 )
 
 
 def build_review_message(
-    evaluation: Evaluation, guidance: str = SESSION_GUIDANCE
+    reviews: Iterable[Review], *, guidance: str = CHECK_GUIDANCE
 ) -> str:
-    """Build the review request, closing with the caller's guidance."""
-    lines = [
-        "Documentation may need review.",
-        "",
-        "Changed sources triggered these doc-sync rules:",
-    ]
-    lines.extend(
-        f"  [{impact.rule_id}] {source} -> {document}"
-        for impact in evaluation.impacts
-        for source in impact.matched_sources
-        for document in impact.review_targets
-    )
+    """Build a review request from pending documents."""
+    lines = ["Documentation needs review.", ""]
+    for review in reviews:
+        lines.append(review.document)
+        lines.extend(f"  {source}" for source in review.sources)
     lines.extend(["", guidance])
     return "\n".join(lines)

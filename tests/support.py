@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from doc_sync.model import Rule
+from doc_sync.config import Document
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
-# The rule every fixture repository is built around. `write_config` renders its
-# TOML from this object so the config and the expected Rule cannot drift apart.
-APPLICATION_RULE = Rule(id="application", sources=("src/",), documents=("README.md",))
+APPLICATION_DOCUMENT = Document(path="README.md", sources=("src/",))
 
 
 def git(root: Path, *arguments: str) -> str:
@@ -37,21 +36,19 @@ def commit_all(root: Path, message: str = "initial") -> None:
     git(root, "commit", "-qm", message)
 
 
-def render_config(rule: Rule) -> str:
-    sources = ", ".join(f'"{source}"' for source in rule.sources)
-    documents = ", ".join(f'"{document}"' for document in rule.documents)
-    return (
-        "config_version = 1\n"
-        "\n"
-        "[[rules]]\n"
-        f'id = "{rule.id}"\n'
-        f"sources = [{sources}]\n"
-        f"documents = [{documents}]\n"
-    )
+def render_config(documents: Iterable[Document]) -> str:
+    lines = ["[documents]"]
+    for document in documents:
+        sources = ", ".join(json.dumps(source) for source in document.sources)
+        lines.append(f"{json.dumps(document.path)} = [{sources}]")
+    return "\n".join(lines) + "\n"
 
 
-def write_config(root: Path, *, document: str = "README.md") -> Path:
+def write_config(
+    root: Path, *, document: str = "README.md", sources: tuple[str, ...] = ("src/",)
+) -> Path:
     path = root / "doc-sync.toml"
-    rule = replace(APPLICATION_RULE, documents=(document,))
-    path.write_text(render_config(rule), encoding="utf-8")
+    path.write_text(
+        render_config((Document(path=document, sources=sources),)), encoding="utf-8"
+    )
     return path

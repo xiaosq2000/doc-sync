@@ -1,4 +1,4 @@
-"""Filesystem primitives shared by state and installation writers."""
+"""Filesystem primitives used by hook state."""
 
 from __future__ import annotations
 

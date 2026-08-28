@@ -6,6 +6,7 @@ import pytest
 
 from doc_sync.config import (
     ConfigError,
+    Document,
     MissingConfigError,
     load_config,
     validate_repository_config,
@@ -15,43 +16,30 @@ from tests.support import write_config
 if TYPE_CHECKING:
     from pathlib import Path
 
-UNKNOWN_RULE_KEY = """config_version = 1
-[[rules]]
-id = "application"
-sources = ["src/"]
-document = ["README.md"]
-"""
 
-LEGACY_LAYOUT = """version = 1
-[[watch]]
-sources = ["src/"]
-"""
+def test_loads_documents_in_stable_path_order(root: Path) -> None:
+    path = root / "doc-sync.toml"
+    path.write_text(
+        '[documents]\n"z.md" = ["z/"]\n"a.md" = ["a/", "common.py"]\n',
+        encoding="utf-8",
+    )
 
-GLOB_DOCUMENT = """config_version = 1
-[[rules]]
-id = "application"
-sources = ["src/"]
-documents = ["docs/*.md"]
-"""
+    config = load_config(path)
+
+    assert config.documents == (
+        Document(path="a.md", sources=("a/", "common.py")),
+        Document(path="z.md", sources=("z/",)),
+    )
 
 
-def test_loads_named_rules(root: Path) -> None:
-    config = load_config(write_config(root))
-
-    assert config.config_version == 1
-    assert config.rules[0].id == "application"
-
-
-# Agent adapters branch on this subclass to stay silent for a repository that
-# never opted in, so an absent file must not be conflated with a broken one.
-def test_an_absent_file_raises_the_missing_config_subclass(root: Path) -> None:
+def test_an_absent_file_has_a_distinct_error(root: Path) -> None:
     with pytest.raises(MissingConfigError, match="does not exist"):
         load_config(root / "doc-sync.toml")
 
 
 def test_a_broken_file_is_not_reported_as_missing(root: Path) -> None:
     path = root / "doc-sync.toml"
-    path.write_text("config_version = 1\n[[rules\n", encoding="utf-8")
+    path.write_text("[documents\n", encoding="utf-8")
 
     with pytest.raises(ConfigError, match="TOML parse error") as caught:
         load_config(path)
@@ -62,11 +50,29 @@ def test_a_broken_file_is_not_reported_as_missing(root: Path) -> None:
 @pytest.mark.parametrize(
     ("content", "expected_message"),
     [
-        (UNKNOWN_RULE_KEY, "`document`"),
-        (LEGACY_LAYOUT, "pre-1 `version`/`\\[\\[watch\\]\\]` configuration"),
-        (GLOB_DOCUMENT, "must be an exact"),
+        ("config_version = 1\n[documents]\n", "unknown key"),
+        ("[documents]\n", "non-empty"),
+        ('[documents]\n"README.md" = []\n', "non-empty array"),
+        ('[documents]\n"docs/*.md" = ["src/"]\n', "exact file path"),
+        ('[documents]\n"README.md" = ["../src"]\n', "`..`"),
+        (
+            '[documents]\n"README.md" = ["src/", "./src/"]\n',
+            "duplicate source",
+        ),
+        (
+            '[documents]\n"README.md" = ["src/"]\n"./README.md" = ["lib/"]\n',
+            "duplicate document path",
+        ),
     ],
-    ids=["unknown-rule-key", "legacy-layout", "glob-document"],
+    ids=[
+        "unknown-root-key",
+        "empty-documents",
+        "empty-sources",
+        "glob-document",
+        "parent-source",
+        "duplicate-source",
+        "duplicate-document",
+    ],
 )
 def test_rejects_invalid_config(
     root: Path, content: str, expected_message: str
@@ -78,48 +84,18 @@ def test_rejects_invalid_config(
         load_config(path)
 
 
-@pytest.mark.parametrize(
-    ("original", "replacement", "expected_message"),
-    [
-        (
-            "config_version = 1\n",
-            "config_version = 1\nunknown = true\n",
-            "unknown key",
-        ),
-        ('sources = ["src/"]', 'sources = ["src/", "./src/"]', "duplicate path"),
-        ('id = "application"', 'id = "Application"', "`id` must match"),
-    ],
-    ids=["unknown-root-key", "duplicate-source", "uppercase-id"],
-)
-def test_rejects_invalid_edit(
-    root: Path, original: str, replacement: str, expected_message: str
-) -> None:
-    path = write_config(root)
-    path.write_text(
-        path.read_text(encoding="utf-8").replace(original, replacement),
-        encoding="utf-8",
-    )
+def test_repository_validation_requires_documents(repository: Path) -> None:
+    path = write_config(repository, document="docs/missing.md")
 
-    with pytest.raises(ConfigError, match=expected_message):
-        load_config(path)
-
-
-def test_repository_validation_checks_paths(repository: Path) -> None:
-    config = validate_repository_config(
-        root=repository, config_path=repository / "doc-sync.toml"
-    )
-
-    assert config.rules[0].sources == ("src/",)
-
-
-def test_repository_validation_reports_missing_paths(repository: Path) -> None:
-    path = repository / "doc-sync.toml"
-    path.write_text(
-        path.read_text(encoding="utf-8").replace(
-            'sources = ["src/"]', 'sources = ["absent/"]'
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="does not point to an existing directory"):
+    with pytest.raises(ConfigError, match=r"docs/missing\.md.*does not exist"):
         validate_repository_config(root=repository, config_path=path)
+
+
+def test_repository_validation_allows_unmatched_source_patterns(
+    repository: Path,
+) -> None:
+    path = write_config(repository, sources=("future/**/*.py",))
+
+    config = validate_repository_config(root=repository, config_path=path)
+
+    assert config.documents[0].sources == ("future/**/*.py",)

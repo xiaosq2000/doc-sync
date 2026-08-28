@@ -3,225 +3,156 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-**Keep documentation honest as AI agents change your code.**
-
-AI coding agents move fast — a single session can touch dozens of files across a
-monorepo. Documentation drifts silently. By the time a human notices, the docs
-describe a codebase that no longer exists.
-
-Doc-sync is a deterministic guard that maps source files to the documents that
-describe them. When a matched source changes and its document doesn't, doc-sync
-blocks the agent and asks for a review — before the session ends, not weeks
-later.
-
-- **Deterministic.** No LLM calls, no heuristics — a TOML file maps sources to
-  documents and the engine evaluates changed paths against it.
-- **Lightweight.** Pure Python with a single dependency, `pathspec`, for
-  gitignore-style pattern matching.
-- **Agent-native.** First-class hooks for Claude Code, Codex CLI, and OpenCode.
-  One command wires each integration.
-- **Git-aware.** Compares against HEAD, staged changes, merge bases, or explicit
-  file lists. Acknowledgement state lives in Git metadata — no dotfiles in your
-  working tree.
-
-## Quick start
-
-```bash
-doc-sync init                    # create doc-sync.toml with starter rules
-doc-sync validate --check-paths  # verify paths exist in the repo
-doc-sync check                   # run the check
-doc-sync review                  # run the check by hand, even while switched off
-doc-sync hook install claude     # wire a Stop hook for Claude Code
-doc-sync disable                 # switch it off here; `enable` switches it back
-```
+Doc-sync finds documents that may need review after source files change. It
+uses a repository configuration and Git. It does not call an LLM or guess what
+the source change means.
 
 ## Install
 
-Requires Python 3.11+ and Git.
+Doc-sync requires Python 3.11 or newer and Git.
 
 ```bash
-# uv (recommended)
 uv tool install git+https://github.com/xiaosq2000/doc-sync.git
+```
 
-# pipx
+You can also use `pipx`:
+
+```bash
 pipx install git+https://github.com/xiaosq2000/doc-sync.git
 ```
 
-In a [pixi](https://pixi.sh) workspace, add doc-sync as a PyPI dependency in
-`pixi.toml`:
+See the [installation guide](docs/installation.md) for source installs,
+upgrades, and removal.
+
+## Configure documents
+
+Create `doc-sync.toml` at the repository root. Each key in `[documents]` is an
+exact document path. Its value is a list of source patterns that may affect the
+document.
 
 ```toml
-[pypi-dependencies]
-doc-sync = { git = "https://github.com/xiaosq2000/doc-sync.git" }
-```
-
-Or run once without installing:
-
-```bash
-uvx --from git+https://github.com/xiaosq2000/doc-sync.git doc-sync --help
-```
-
-See the [installation guide](docs/installation.md) for virtual-environment
-setup, source checkouts, upgrades, uninstallation, and troubleshooting.
-
-## Configuration
-
-Project-specific mappings live at the repository root in `doc-sync.toml`:
-
-```toml
-config_version = 1
-
-[[rules]]
-id = "public-api"
-sources = [
-  "src/",
+[documents]
+"README.md" = [
+  "src/**",
   "pyproject.toml",
 ]
-documents = [
-  "README.md",
-  "docs/api.md",
+
+"docs/api.md" = [
+  "src/api/**",
 ]
 ```
 
-Each rule needs a stable, unique lowercase `id`. When any `sources` pattern
-matches a changed path, every unchanged `documents` entry becomes a review
-target.
+When a source pattern matches a changed file and the document is unchanged,
+doc-sync asks for a review. A changed document needs no further review.
 
-Source patterns are repository-relative and case-sensitive:
+Source patterns are relative to the repository root and are case sensitive.
 
-- `path/to/file.toml` matches one exact file.
-- `path/to/dir/` matches that directory recursively.
-- `src/*.py` keeps `*` within one path segment.
-- `**/*.py` uses globstar semantics and matches top-level and nested files.
+- `pyproject.toml` matches one root file.
+- `src/` matches every file under the root `src` directory.
+- `src/*.py` matches Python files directly inside `src`.
+- `**/*.py` matches Python files at any depth.
 
-Every pattern is anchored to the repository root, so `pyproject.toml` names the
-root file and `src/` never matches a nested `vendor/src/`. Matching at any depth
-is opt-in through an explicit `**/` prefix: `app.py` is the root file, while
-`**/app.py` is that file anywhere in the repository.
+Every pattern is anchored to the repository root. For example, `src/` does not
+match `vendor/src/`. Use an explicit `**/` prefix when a pattern should match at
+any depth.
 
-Documents are exact file paths — doc-sync intentionally does not accept document
-globs because its output should identify concrete review targets.
+Documents must be exact paths. Document globs are not accepted because every
+result must name a concrete file.
 
-A repository holding no `doc-sync.toml` has not opted in, so its agent hooks stay
-silent rather than reporting the absence on every turn. Run `doc-sync init` to
-opt in. An invalid configuration is a different matter and still blocks with an
-explanation.
+## Check changes
 
-## Validation
-
-Structural validation catches malformed TOML, unknown fields, unsupported
-versions, duplicate IDs, and unsafe paths:
-
-```bash
-doc-sync validate
-```
-
-Add `--check-paths` to also verify that every path and directory exists and every
-glob matches at least one tracked file:
-
-```bash
-doc-sync validate --check-paths
-```
-
-A `doc-sync-validate` pre-commit hook and a JSON Schema at
-`schemas/doc-sync.schema.json` are included in the repository.
-
-## Selecting changes
-
-By default, `doc-sync check` compares the working tree, index, and untracked
-non-ignored files against `HEAD`:
+Run a check against the working tree, staged files, or a merge base:
 
 ```bash
 doc-sync check
 doc-sync check --staged
 doc-sync check --base origin/main
-doc-sync check --paths-from changed-files.txt
-git diff --name-only -z HEAD^ | tr '\0' '\n' | doc-sync check --paths-from -
 ```
 
-`doc-sync review` accepts the same flags and selects changes the same way.
+A manual check always prints a result. It exits `0` when no document needs
+review, `2` when review is required, and `1` for configuration or Git errors.
 
-Use `--format json` for machine-readable output. Exit code `0` means no review
-is needed — or that doc-sync is switched off here; `2` means documents should be
-reviewed; `1` signals a configuration or operational error.
+Use `--json` for scripts:
 
-## Agent hooks
+```json
+{
+  "documents": [
+    {
+      "path": "README.md",
+      "sources": ["src/client.py"]
+    }
+  ],
+  "status": "review_required"
+}
+```
 
-Wire an integration without editing agent config files yourself:
+Validate the configuration and require every document to exist:
 
 ```bash
-doc-sync hook install claude
-doc-sync hook install codex
-doc-sync hook install opencode
-doc-sync hook install all --dry-run
+doc-sync validate
 ```
 
-Each integration is placed where the agent expects it: a `Stop` entry in
-`.claude/settings.json`, a `Stop` entry in `.codex/hooks.json`, or a generated
-`.opencode/plugins/doc-sync.ts`. Existing hooks are preserved; doc-sync only
-manages its own entries.
+Source patterns do not have to match a file on the current branch. A shared
+configuration can therefore refer to files that exist only on another branch.
 
-Remove managed wiring with:
+## Add a Stop hook
 
-```bash
-doc-sync hook uninstall claude   # or codex, opencode, all
+Claude Code and Codex use the same `doc-sync hook` command. Add the following
+Stop entry to `.claude/settings.json` or `.codex/hooks.json`, while preserving
+any settings and hooks already in the file:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "doc-sync hook",
+            "timeout": 30,
+            "statusMessage": "Checking documentation impact..."
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
-### Codex trust
+Codex requires project hooks to be trusted. Open Codex in the repository and
+use `/hooks` to review the entry.
 
-Codex requires two extra steps before a hook runs: the repository must be a
-trusted Codex project (offered on first launch), and the hook itself must be
-reviewed from `/hooks` inside Codex. Doc-sync will not write trust records on
-your behalf.
+The hook stays silent when no `doc-sync.toml` exists or no review is needed. A
+broken configuration returns a continuation message so the agent can report or
+fix it.
 
-### Acknowledgement state
+The agent protocol marks a continuation with `stop_hook_active`. Doc-sync lets
+that continuation stop without running another check. It also remembers the
+last review shown in each session, so unchanged source state does not produce a
+reminder on every later turn. A change to a relevant source, document, or
+configuration produces a new reminder.
 
-A review reminder fires once per agent session and relevant source/document
-state. State lives under `git rev-parse --git-path doc-sync` — nothing is added
-to the repository or `.gitignore`. Changing a matched source, document, rule, or
-configuration triggers a new reminder; unrelated dirty files do not.
+Acknowledgement state lives under `git rev-parse --git-path doc-sync`. No state
+file enters the working tree.
 
-### Switching doc-sync off
+## Disable the Stop hook locally
 
-To quiet doc-sync for a while without touching your agent configuration:
+Disable or enable only the automatic Stop hook for the current checkout:
 
 ```bash
 doc-sync disable
-doc-sync status    # doc-sync is disabled for /path/to/repo
 doc-sync enable
 ```
 
-While disabled, `doc-sync check` and every agent hook exit `0` and print nothing
-at all — a disabled checkout costs an agent zero context on every turn.
-`doc-sync check --format json` reports `"status": "disabled"` for scripts that
-need to tell the two apart. `review`, `validate`, `init`, and
-`hook install`/`uninstall` ignore the switch, so you can still ask for a check,
-lint your configuration, and manage wiring while it is off.
+Manual `check` and `validate` commands still run while the hook is disabled.
+The switch is local to one checkout and is stored beside acknowledgement state
+under Git metadata.
 
-### Checking by hand
+## Pre-commit
 
-`doc-sync review` runs the same check as `doc-sync check`, but it ignores the
-switch and always answers — including a `doc-sync: no documents need review` line
-when there is nothing to report:
-
-```bash
-doc-sync review
-```
-
-That makes the switch a choice about the automatic reminder rather than about
-doc-sync as a whole. Switch it off so the Stop hook stops spending context on
-every turn, then ask for a check at the moments you actually want one. Inside an
-agent, run it directly from the prompt — `!doc-sync review` in Claude Code — to
-pull the result into a long session without re-enabling the hook.
-
-The switch is a marker file beside the acknowledgement state, under
-`git rev-parse --git-path doc-sync`. It is local to one checkout: nothing is
-committed, nothing enters your working tree, and a fresh clone — including the
-one your CI makes — is always enabled. Like the acknowledgement state, it is
-scoped to a single worktree, so a linked worktree carries its own switch.
-
-To remove the integration outright rather than quiet it, use
-`doc-sync hook uninstall`.
+The repository publishes a `doc-sync-validate` pre-commit hook. It runs
+`doc-sync validate` and does not receive changed filenames.
 
 ## License
 

@@ -32,9 +32,7 @@ from doc_sync.paths import match_path, normalize_path, relative_path_error
         # negation or a comment.
         ("!literal.py", "!literal.py", True),
         ("#literal.py", "#literal.py", True),
-        # A bare directory name behaves like the same name with a trailing
-        # slash. `validate --check-paths` still steers configurations to the
-        # explicit `src/` form, which is why this is only a fallback.
+        # A bare directory name behaves like the same name with a trailing slash.
         ("src", "src/app.py", True),
         ("src", "src/pkg/app.py", True),
         # A trailing slash means a directory, so it never matches a file that
@@ -49,6 +47,10 @@ def test_match_path(pattern: str, path: str, expected: bool) -> None:
 
 def test_normalizes_windows_separators() -> None:
     assert normalize_path(r"src\package\app.py") == "src/package/app.py"
+
+
+def test_preserves_whitespace_in_git_paths() -> None:
+    assert normalize_path(" source.py ") == " source.py "
 
 
 @pytest.mark.parametrize(
