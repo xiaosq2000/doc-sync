@@ -53,7 +53,7 @@ Each layer has a strict boundary — `evaluate()` is pure and must never touch G
 - **Git** (`git.py`) — discovers repo root, resolves changed paths (worktree, staged, merge-base, or explicit file lists). All Git calls go through `_run_git()` which shells out to `git`.
 - **State** (`state.py`) — per-session acknowledgement tracking under Git metadata (`git rev-parse --git-path doc-sync`). Uses content-hashing so the same reminder fires only once per distinct source/document/config state. The same directory holds the `disabled` marker (`is_disabled()` / `set_disabled()`), which is the per-checkout on/off switch — deliberately independent of `state_key()`, so toggling does not disturb acknowledgements.
 - **Render** (`render.py`) — builds human/agent-facing review messages from an `Evaluation`.
-- **CLI** (`cli.py`) — wires layers together via argparse subcommands: `check`, `validate`, `init`, `disable`, `enable`, `status`, `hook`. `main()` unpacks the parsed `Namespace` into the selected handler's keyword parameters, so every argparse `dest` must match a parameter name on its handler and handlers never receive a `Namespace`. `disable` and `enable` share `_run_toggle` through `set_defaults(disabled=...)`. `_run_check` and `_hook_evaluation` consult the disabled marker *before* loading config, so a switched-off checkout is quiet even when its config is broken.
+- **CLI** (`cli.py`) — wires layers together via argparse subcommands: `check`, `review`, `validate`, `init`, `disable`, `enable`, `status`, `hook`. `main()` unpacks the parsed `Namespace` into the selected handler's keyword parameters, so every argparse `dest` must match a parameter name on its handler and handlers never receive a `Namespace`. `disable` and `enable` share `_run_toggle` through `set_defaults(disabled=...)`, and `check` and `review` share `_run_check` through `set_defaults(manual=...)`; `manual=True` skips the disabled marker and prints a pass confirmation, because a command the user invoked has to answer. `_run_check` and `_hook_evaluation` consult the disabled marker *before* loading config, so a switched-off checkout is quiet even when its config is broken.
 - **Integrations** (`integrations/`) — agent-specific adapters:
   - `stop_hook.py` — shared Stop-hook protocol for Claude Code and Codex CLI (JSON stdin/stdout with `decision: "block"`).
   - `install.py` — conservative install/uninstall of hooks into `.claude/settings.json`, `.codex/hooks.json`, and `.opencode/plugins/doc-sync.ts`. Manages only its own entries; preserves everything else.
@@ -65,6 +65,8 @@ Each layer has a strict boundary — `evaluate()` is pure and must never touch G
 - `2` — documents need review
 
 A disabled checkout and a missing config both print nothing: "invisible to the agent" is the requirement, so hook adapters return `0` with empty stdout rather than emitting any envelope. `check --format json` is the one exception — it reports `{"status": "disabled", ...}`, keeping `Evaluation.to_dict()`'s key set. Do not add a `DISABLED` member to `Status`; `Evaluation.status` must stay a pure function of `impacts`.
+
+The switch governs what doc-sync says *unprompted*, not whether it runs. `review` is outside that rule by design: it reports normally on a disabled checkout and never emits `"status": "disabled"`. Keep it that way — it is the only way to ask for a check mid-session without re-enabling the hook.
 
 ### Testing
 
