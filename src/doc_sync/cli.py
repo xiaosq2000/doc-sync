@@ -37,6 +37,9 @@ EXIT_REVIEW_REQUIRED = 2
 # Same key set as `Evaluation.to_dict()`, so a disabled checkout does not change
 # the shape a `--format json` consumer has to parse.
 _DISABLED_PAYLOAD = {"status": "disabled", "review_targets": [], "impacts": []}
+# A hand-run check answers even when it has nothing to report; silence would be
+# indistinguishable from a command that failed to run.
+_NO_REVIEW_MESSAGE = "doc-sync: no documents need review"
 # Parser bookkeeping that names a handler rather than one of its parameters.
 _DISPATCH_KEYS = frozenset({"command", "handler", "hook_command"})
 
@@ -85,11 +88,13 @@ def _run_check(
     base: str | None,
     paths_from: str | None,
     output_format: str,
+    manual: bool,
 ) -> int:
     repository = resolve_root(root)
     # Check the switch before the configuration: a disabled checkout stays quiet
-    # even when its `doc-sync.toml` is missing or broken.
-    if is_disabled(_state_directory(repository, state_directory)):
+    # even when its `doc-sync.toml` is missing or broken. A manual run is the
+    # user asking directly, so it ignores the switch.
+    if not manual and is_disabled(_state_directory(repository, state_directory)):
         if output_format == "json":
             _json_output(_DISABLED_PAYLOAD)
         return 0
@@ -98,15 +103,18 @@ def _run_check(
         config.rules,
         _changed_paths(repository, staged=staged, base=base, paths_from=paths_from),
     )
+    needs_review = result.status is Status.REVIEW_REQUIRED
     payload = result.to_dict()
-    if result.status is Status.REVIEW_REQUIRED:
+    if needs_review:
         payload["message"] = build_review_message(result, REVIEW_GUIDANCE)
 
     if output_format == "json":
         _json_output(payload)
-    elif result.status is Status.REVIEW_REQUIRED:
+    elif needs_review:
         print(payload["message"])
-    return EXIT_REVIEW_REQUIRED if result.status is Status.REVIEW_REQUIRED else 0
+    elif manual:
+        print(_NO_REVIEW_MESSAGE)
+    return EXIT_REVIEW_REQUIRED if needs_review else 0
 
 
 def _run_validate(*, root: str | None, config_path: str, check_paths: bool) -> int:
@@ -274,6 +282,22 @@ def _add_state_directory_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state-directory")
 
 
+def _add_check_arguments(parser: argparse.ArgumentParser) -> None:
+    _add_repository_arguments(parser)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--staged", action="store_true", help="Check staged paths.")
+    source.add_argument("--base", help="Check committed paths changed since this ref.")
+    source.add_argument(
+        "--paths-from", metavar="FILE", help="Read changed paths from FILE or `-`."
+    )
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        choices=("human", "json"),
+        default="human",
+    )
+
+
 def _add_stop_hook_arguments(
     parser: argparse.ArgumentParser,
     *,
@@ -297,21 +321,17 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     check = subparsers.add_parser("check", help="Evaluate changed paths.")
-    _add_repository_arguments(check)
+    _add_check_arguments(check)
     _add_state_directory_argument(check)
-    source = check.add_mutually_exclusive_group()
-    source.add_argument("--staged", action="store_true", help="Check staged paths.")
-    source.add_argument("--base", help="Check committed paths changed since this ref.")
-    source.add_argument(
-        "--paths-from", metavar="FILE", help="Read changed paths from FILE or `-`."
+    check.set_defaults(handler=_run_check, manual=False)
+
+    review = subparsers.add_parser(
+        "review", help="Run the check by hand, even when doc-sync is switched off."
     )
-    check.add_argument(
-        "--format",
-        dest="output_format",
-        choices=("human", "json"),
-        default="human",
-    )
-    check.set_defaults(handler=_run_check)
+    _add_check_arguments(review)
+    # `review` never reads the switch, so it exposes no `--state-directory`; the
+    # shared handler's signature still needs the parameter.
+    review.set_defaults(handler=_run_check, manual=True, state_directory=None)
 
     validate = subparsers.add_parser("validate", help="Validate configuration.")
     _add_repository_arguments(validate)

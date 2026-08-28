@@ -6,6 +6,18 @@ released.
 
 ## Unreleased
 
+### Added
+
+- `doc-sync review` runs the check by hand. It takes the same change-selection
+  and output flags as `doc-sync check`, but it ignores the per-checkout switch
+  and always answers, printing `doc-sync: no documents need review` when there is
+  nothing to report. This makes `doc-sync disable` a choice about the automatic
+  reminder rather than about doc-sync as a whole: switch the hook off so it stops
+  spending an agent's context every turn, then ask for a check when you want one.
+  Inside an agent it is a single short command — `!doc-sync review` in Claude
+  Code — so a long session can pull the result in without re-enabling the hook.
+  Unlike `check`, it never reports `"status": "disabled"`.
+
 ### Changed
 
 - Agent hooks now stay silent in a repository holding no `doc-sync.toml`. Such a

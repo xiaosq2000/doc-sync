@@ -30,6 +30,7 @@ later.
 doc-sync init                    # create doc-sync.toml with starter rules
 doc-sync validate --check-paths  # verify paths exist in the repo
 doc-sync check                   # run the check
+doc-sync review                  # run the check by hand, even while switched off
 doc-sync hook install claude     # wire a Stop hook for Claude Code
 doc-sync disable                 # switch it off here; `enable` switches it back
 ```
@@ -138,6 +139,8 @@ doc-sync check --paths-from changed-files.txt
 git diff --name-only -z HEAD^ | tr '\0' '\n' | doc-sync check --paths-from -
 ```
 
+`doc-sync review` accepts the same flags and selects changes the same way.
+
 Use `--format json` for machine-readable output. Exit code `0` means no review
 is needed — or that doc-sync is switched off here; `2` means documents should be
 reviewed; `1` signals a configuration or operational error.
@@ -191,9 +194,25 @@ doc-sync enable
 While disabled, `doc-sync check` and every agent hook exit `0` and print nothing
 at all — a disabled checkout costs an agent zero context on every turn.
 `doc-sync check --format json` reports `"status": "disabled"` for scripts that
-need to tell the two apart. `validate`, `init`, and `hook install`/`uninstall`
-ignore the switch, so you can still lint your configuration and manage wiring
-while it is off.
+need to tell the two apart. `review`, `validate`, `init`, and
+`hook install`/`uninstall` ignore the switch, so you can still ask for a check,
+lint your configuration, and manage wiring while it is off.
+
+### Checking by hand
+
+`doc-sync review` runs the same check as `doc-sync check`, but it ignores the
+switch and always answers — including a `doc-sync: no documents need review` line
+when there is nothing to report:
+
+```bash
+doc-sync review
+```
+
+That makes the switch a choice about the automatic reminder rather than about
+doc-sync as a whole. Switch it off so the Stop hook stops spending context on
+every turn, then ask for a check at the moments you actually want one. Inside an
+agent, run it directly from the prompt — `!doc-sync review` in Claude Code — to
+pull the result into a long session without re-enabling the hook.
 
 The switch is a marker file beside the acknowledgement state, under
 `git rev-parse --git-path doc-sync`. It is local to one checkout: nothing is

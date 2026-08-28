@@ -201,6 +201,56 @@ def test_disabling_passes_check_without_a_review(
         assert json.loads(output)["status"] == "disabled"
 
 
+# `review` is the escape hatch from the switch, so it has to answer in the one
+# situation `check` stays quiet. Neither command is given `--state-directory`, so
+# both read the default: the contrast is the marker itself, not two separate
+# states, and the silent `check` keeps the `review` assertions from passing
+# vacuously against a marker written somewhere it never looks.
+@pytest.mark.parametrize("arguments", [[], ["--format", "json"]], ids=["human", "json"])
+def test_review_reports_documents_while_disabled(
+    repository: Path, capsys: pytest.CaptureFixture[str], arguments: list[str]
+) -> None:
+    (repository / "src/app.py").write_text("v2", encoding="utf-8")
+    root = ["--root", str(repository)]
+    main(["disable", *root])
+    capsys.readouterr()
+
+    check_exit = main(["check", *root])
+    check_output = capsys.readouterr().out
+
+    review_exit = main(["review", *root, *arguments])
+    review_output = capsys.readouterr().out
+
+    assert check_exit == 0
+    assert check_output == ""
+    assert review_exit == 2
+    assert "README.md" in review_output
+    if arguments:
+        # Never `"status": "disabled"` — the switch does not reach a hand-run check.
+        assert json.loads(review_output)["status"] == "review_required"
+    else:
+        assert "Documentation may need review" in review_output
+
+
+# A command the user ran by hand has to say something, or silence reads as a
+# command that never ran. `check` stays silent, because nothing asked it to speak.
+def test_review_confirms_when_nothing_needs_review(
+    repository: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = ["--root", str(repository)]
+
+    review_exit = main(["review", *root])
+    review_output = capsys.readouterr().out
+
+    check_exit = main(["check", *root])
+    check_output = capsys.readouterr().out
+
+    assert review_exit == 0
+    assert "no documents need review" in review_output
+    assert check_exit == 0
+    assert check_output == ""
+
+
 def test_toggle_reports_the_state_and_whether_it_changed(
     repository: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
