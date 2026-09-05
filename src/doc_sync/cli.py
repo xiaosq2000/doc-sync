@@ -20,13 +20,15 @@ from doc_sync.git import (
     changed_worktree_paths,
     resolve_root,
 )
-from doc_sync.hook import blocking_output, parse_context
+from doc_sync.hook import HookContext, blocking_output, parse_context
 from doc_sync.match import Review, evaluate
 from doc_sync.render import HOOK_GUIDANCE, build_review_message
 from doc_sync.state import (
     AcknowledgementStore,
+    BaselineStore,
     default_state_directory,
     is_disabled,
+    session_changed_paths,
     set_disabled,
 )
 
@@ -80,15 +82,27 @@ def _run_validate() -> int:
     return 0
 
 
-def _hook_reviews(*, root: Path, session_id: str) -> tuple[Review, ...] | None:
+def _hook_reviews(*, root: Path, context: HookContext) -> tuple[Review, ...] | None:
     state_directory = default_state_directory(root)
     if is_disabled(state_directory):
         return None
 
     config_path = root / CONFIG_FILENAME
     config = load_config(config_path)
-    reviews = evaluate(config.documents, changed_worktree_paths(root))
+    session_id = context.session_id
     store = AcknowledgementStore(state_directory)
+    baselines = BaselineStore(state_directory)
+    baseline = baselines.load(session_id)
+    if baseline is None:
+        baselines.capture(session_id=session_id, root=root)
+        store.clear(session_id)
+        return None
+    if context.hook_event_name == "SessionStart":
+        return None
+    reviews = evaluate(
+        config.documents,
+        session_changed_paths(root=root, baseline=baseline, documents=config.documents),
+    )
     if not reviews:
         store.clear(session_id)
         return None
@@ -103,20 +117,23 @@ def _hook_reviews(*, root: Path, session_id: str) -> tuple[Review, ...] | None:
 
 
 def _run_hook() -> int:
+    context = None
     try:
         context = parse_context(sys.stdin.read())
         if context.stop_hook_active:
             return 0
-        reviews = _hook_reviews(
-            root=resolve_root(str(context.cwd)), session_id=context.session_id
-        )
+        reviews = _hook_reviews(root=resolve_root(str(context.cwd)), context=context)
         if reviews:
             reason = build_review_message(reviews, guidance=HOOK_GUIDANCE)
             _write_json(blocking_output(reason))
     except MissingConfigError:
         return 0
     except (DocSyncError, OSError) as exc:
-        _write_json(blocking_output(f"doc-sync could not complete its check: {exc}"))
+        reason = f"doc-sync could not complete its check: {exc}"
+        if context is not None and context.hook_event_name == "SessionStart":
+            print(reason, file=sys.stderr)
+        else:
+            _write_json(blocking_output(reason))
     return 0
 
 
@@ -146,7 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate", help="Validate doc-sync.toml.")
     validate.set_defaults(handler=_run_validate)
 
-    hook = subparsers.add_parser("hook", help="Run the shared Stop hook adapter.")
+    hook = subparsers.add_parser("hook", help="Run the shared session hook adapter.")
     hook.set_defaults(handler=_run_hook)
 
     disable = subparsers.add_parser("disable", help="Disable the Stop hook here.")

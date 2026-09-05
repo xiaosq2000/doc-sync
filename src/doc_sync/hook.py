@@ -1,4 +1,4 @@
-"""The Stop hook protocol shared by Claude Code and Codex."""
+"""The session hook protocol shared by Claude Code and Codex."""
 
 from __future__ import annotations
 
@@ -11,20 +11,21 @@ from doc_sync.errors import DocSyncError
 
 
 class HookInputError(DocSyncError, ValueError):
-    """Raised when an agent supplies malformed Stop hook input."""
+    """Raised when an agent supplies malformed hook input."""
 
 
 @dataclass(frozen=True)
 class HookContext:
-    """Fields needed from a Stop hook payload."""
+    """Fields needed from a SessionStart or Stop hook payload."""
 
     session_id: str
     cwd: Path
     stop_hook_active: bool
+    hook_event_name: str
 
 
 def parse_context(raw_input: str) -> HookContext:
-    """Parse the common Stop hook input fields."""
+    """Parse shared fields and validate event-specific input."""
     try:
         payload = json.loads(raw_input)
     except json.JSONDecodeError as exc:
@@ -34,7 +35,10 @@ def parse_context(raw_input: str) -> HookContext:
 
     session_id = payload.get("session_id")
     cwd = payload.get("cwd")
-    stop_hook_active = payload.get("stop_hook_active")
+    event = payload.get("hook_event_name", "Stop")
+    if event not in ("SessionStart", "Stop"):
+        raise HookInputError("hook input has an unsupported `hook_event_name`")
+    stop_hook_active = payload.get("stop_hook_active") if event == "Stop" else False
     if not isinstance(session_id, str) or not session_id:
         raise HookInputError("hook input is missing `session_id`")
     if not isinstance(cwd, str) or not cwd:
@@ -45,6 +49,7 @@ def parse_context(raw_input: str) -> HookContext:
         session_id=session_id,
         cwd=Path(cwd),
         stop_hook_active=stop_hook_active,
+        hook_event_name=event,
     )
 
 

@@ -7,6 +7,10 @@ Semantic Versioning after its first stable release.
 
 ### Changed
 
+- The automatic hook now compares files with a session baseline instead of
+  `HEAD`, so pre-existing edits do not trigger reminders. Add SessionStart
+  alongside Stop using the same `doc-sync hook` command. Without a baseline,
+  the first hook call saves the current state silently and checks later edits.
 - Replaced named rules with a `[documents]` table that maps each exact document
   path to its source patterns. Removed `config_version`, rule IDs, and rules
   that group several documents. The old configuration format is not accepted.

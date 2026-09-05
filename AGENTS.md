@@ -46,11 +46,13 @@ demonstrated use case.
   ordinary character.
 - `match.py` implements pure matching. `evaluate()` must not access Git, files,
   hook input, or command output.
-- `git.py` discovers the repository and reads worktree, staged, or merge base
-  changes. All Git calls go through `_run_git()`.
-- `hook.py` parses the Stop protocol shared by Claude Code and Codex.
-- `state.py` stores per session acknowledgements and the local disable marker
-  under `git rev-parse --git-path doc-sync`.
+- `git.py` discovers the repository, lists worktree paths, and reads worktree,
+  staged, or merge base changes. All Git calls go through `_run_git()`.
+- `hook.py` parses the SessionStart and Stop protocols shared by Claude Code
+  and Codex.
+- `state.py` stores per session baselines, acknowledgements, and the local
+  disable marker under `git rev-parse --git-path doc-sync`. It compares relevant
+  file fingerprints against the session baseline.
 - `cli.py` connects the modules and owns all human and JSON output.
 
 ## Hook rules
@@ -60,9 +62,16 @@ protocol field prevents continuation loops. The acknowledgement store serves a
 different purpose and suppresses the same reminder across later turns in one
 session.
 
+SessionStart captures a baseline once per session and checkout. Resume and
+compaction preserve it. Stop compares sources and documents against that
+baseline, including changes committed during the session. A missing, corrupt,
+or unsupported baseline is initialized silently. Clearing acknowledgements must
+not clear the baseline. SessionStart operational errors go to stderr and exit
+`0`, without Stop-specific blocking JSON.
+
 A missing `doc-sync.toml` is silent only in `hook`. A malformed configuration
-returns blocking JSON. Manual `check` and `validate` commands report either
-error on stderr and exit `1`.
+returns blocking JSON at Stop. Manual `check` and `validate` commands report
+either error on stderr and exit `1`.
 
 The disable marker affects only `hook`. Manual commands always run. Do not add a
 disabled status to manual JSON output.

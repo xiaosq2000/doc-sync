@@ -56,6 +56,28 @@ def changed_worktree_paths(root: Path) -> tuple[str, ...]:
     return tuple(sorted(changed))
 
 
+def worktree_paths(root: Path) -> tuple[str, ...]:
+    """List tracked and non-ignored untracked paths, including deleted entries."""
+    return tuple(
+        sorted(
+            set(
+                _nul_paths(
+                    _run_git(
+                        root,
+                        [
+                            "ls-files",
+                            "--cached",
+                            "--others",
+                            "--exclude-standard",
+                            "-z",
+                        ],
+                    )
+                )
+            )
+        )
+    )
+
+
 def changed_staged_paths(root: Path) -> tuple[str, ...]:
     """Return paths changed in the Git index."""
     return tuple(

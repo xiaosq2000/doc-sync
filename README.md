@@ -98,12 +98,23 @@ configuration can therefore refer to files that exist only on another branch.
 ## Add a Stop hook
 
 Claude Code and Codex use the same `doc-sync hook` command. Add the following
-Stop entry to `.claude/settings.json` or `.codex/hooks.json`, while preserving
-any settings and hooks already in the file:
+SessionStart and Stop entries to `.claude/settings.json` or `.codex/hooks.json`,
+while preserving any settings and hooks already in the file:
 
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "doc-sync hook",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -124,8 +135,26 @@ Codex requires project hooks to be trusted. Open Codex in the repository and
 use `/hooks` to review the entry.
 
 The hook stays silent when no `doc-sync.toml` exists or no review is needed. A
-broken configuration returns a continuation message so the agent can report or
-fix it.
+broken configuration returns a continuation message at Stop so the agent can
+report or fix it. SessionStart failures are reported on stderr without blocking
+the session.
+
+SessionStart saves a baseline of tracked and non-ignored untracked files. Stop
+checks for changes since that baseline, so pre-existing edits do not trigger a
+reminder when the agent only reads files or answers questions. A document edited
+before the session does not suppress review of source changes made during the
+session. The baseline is preserved when the same session resumes or compacts.
+
+Changes made by you or other tools in the same checkout during the session also
+count. Committing session edits does not hide them from the hook. Staging or
+committing existing edits alone does not trigger a reminder. Restoring a file to
+its starting state removes it from the session's changes.
+
+If a baseline is missing, corrupt, or from an unsupported version, the hook
+saves the current state and stays silent. Existing installations should add the
+SessionStart entry and start a new session to detect edits in the first
+response. With only Stop configured, the first Stop establishes the baseline,
+and only later edits can trigger a reminder.
 
 The agent protocol marks a continuation with `stop_hook_active`. Doc-sync lets
 that continuation stop without running another check. It also remembers the
@@ -133,8 +162,10 @@ last review shown in each session, so unchanged source state does not produce a
 reminder on every later turn. A change to a relevant source, document, or
 configuration produces a new reminder.
 
-Acknowledgement state lives under `git rev-parse --git-path doc-sync`. No state
-file enters the working tree.
+Baselines and acknowledgements live separately under
+`git rev-parse --git-path doc-sync`. Baselines contain file fingerprints, not
+file contents. Clearing an acknowledgement preserves the baseline. No state
+file enters the working tree, and linked worktrees have separate state.
 
 ## Disable the Stop hook locally
 

@@ -15,15 +15,30 @@ BROKEN_CONFIG = "[documents\n"
 
 
 def _hook_payload(
-    root: Path, *, session_id: str = "session-1", active: bool = False
+    root: Path,
+    *,
+    session_id: str = "session-1",
+    active: bool = False,
+    event: str = "Stop",
 ) -> str:
     return json.dumps(
         {
             "session_id": session_id,
             "cwd": str(root),
             "stop_hook_active": active,
+            "hook_event_name": event,
         }
     )
+
+
+def _start_session(
+    root: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(_hook_payload(root, event="SessionStart"))
+    )
+    assert main(["hook"]) == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_json_check_has_a_small_stable_contract(
@@ -61,6 +76,7 @@ def test_hook_blocks_once_for_the_same_session_state(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _start_session(repository, capsys, monkeypatch)
     (repository / "src/app.py").write_text("v2", encoding="utf-8")
     payload = _hook_payload(repository)
 
@@ -100,6 +116,7 @@ def test_hook_resolves_a_repository_from_a_nested_payload_cwd(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _start_session(repository, capsys, monkeypatch)
     (repository / "src/app.py").write_text("v2", encoding="utf-8")
     monkeypatch.setattr("sys.stdin", io.StringIO(_hook_payload(repository / "src")))
 
