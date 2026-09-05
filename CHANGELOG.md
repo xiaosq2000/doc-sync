@@ -5,6 +5,8 @@ Semantic Versioning after its first stable release.
 
 ## Unreleased
 
+## 0.1.0a2
+
 ### Changed
 
 - The automatic hook now compares files with a session baseline instead of

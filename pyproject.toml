@@ -22,7 +22,7 @@ license-files = ["LICENSE"]
 name = "doc-sync"
 readme = "README.md"
 requires-python = ">=3.11"
-version = "0.1.0a1"
+version = "0.1.0a2"
 
 [project.scripts]
 doc-sync = "doc_sync.cli:main"
