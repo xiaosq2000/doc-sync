@@ -11,15 +11,20 @@ if TYPE_CHECKING:
 
 _REVIEW_GUIDANCE = (
     "Review each document and update it if the listed source changes altered "
-    "durable facts."
+    "durable facts.\n"
+    "`git diff <commit> -- <source>` shows a change since the commit in the "
+    "document's heading."
 )
 CHECK_GUIDANCE = (
     f"{_REVIEW_GUIDANCE}\nThen record the review with `doc-sync stamp <document>`."
 )
 HOOK_GUIDANCE = (
     f"{_REVIEW_GUIDANCE}\n"
-    "Then record the review with `doc-sync stamp <document>`, also when no update "
-    "is needed."
+    "If a `doc-sync-reviewer` subagent is available, run one for each document. "
+    "Update the documents it reports as affected, and ask the user about those "
+    "it is unsure of.\n"
+    "Record each review with `doc-sync stamp <document>`, also when no update is "
+    "needed."
 )
 
 

@@ -72,6 +72,7 @@ def test_existing_edits_do_not_prompt(hook: HookRunner, staged: bool) -> None:
     assert response["decision"] == "block"
     # The reminder covers every change since the stamp, from any session.
     assert "  src/app.py\n  src/untracked.py\n" in response["reason"]
+    assert "doc-sync-reviewer" in response["reason"]
     assert "doc-sync stamp <document>" in response["reason"]
     assert hook() == ""
 

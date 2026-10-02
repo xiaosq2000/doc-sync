@@ -238,6 +238,47 @@ Baselines and acknowledgements live separately under
 file contents. Clearing an acknowledgement preserves the baseline. No state file
 enters the working tree, and linked worktrees have separate state.
 
+## Review with a subagent
+
+The hook reminder suggests a `doc-sync-reviewer` subagent when the agent has
+one. The subagent reads the source diff and the document and reports whether
+the document needs an update. It does not edit files or stamp documents, so the
+main agent stays responsible for both. Without the subagent, the main agent
+reviews each document itself.
+
+For Claude Code, save the following as `.claude/agents/doc-sync-reviewer.md`:
+
+```markdown
+---
+name: doc-sync-reviewer
+description: Decides whether source changes require an update to one document that doc-sync reported. Use once for each reported document.
+tools: Read, Grep, Glob, Bash
+model: haiku
+---
+
+You review one document that doc-sync reported. You receive the document path,
+the commit in its heading, and its changed sources. A document that was never
+stamped has no commit to compare with, so answer `unsure` for it.
+
+1. Run `git diff <commit> -- <sources>`. Read any listed source that the diff
+   does not show, such as a new file.
+2. Read the document.
+3. Decide whether the changes make any statement in the document wrong or
+   incomplete.
+
+Answer with one verdict on the first line, followed by at most three lines:
+
+- `unaffected` when nothing in the document needs to change.
+- `affected`, followed by each section that is now wrong and why.
+- `unsure`, followed by what you could not decide.
+
+Do not edit files and do not run `doc-sync stamp`.
+```
+
+The main agent stamps `unaffected` documents, updates and then stamps
+`affected` ones, and asks you about `unsure` ones. A small model keeps each
+review cheap, and every stamp stays visible in the `doc-sync.lock` diff.
+
 ## Disable the Stop hook locally
 
 Disable or enable only the automatic Stop hook for the current checkout:

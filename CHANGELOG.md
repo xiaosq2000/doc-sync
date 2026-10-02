@@ -11,6 +11,9 @@ Semantic Versioning after its first stable release.
   review, and `doc-sync stamp` writes it. Run `doc-sync stamp --all` once to
   start a repository on the lock.
 - A `doc-sync-check` pre-commit hook runs `doc-sync check`.
+- The hook reminder suggests an optional `doc-sync-reviewer` subagent, and the
+  README provides its Claude Code definition. The subagent only reports a
+  verdict. It does not edit or stamp documents.
 - A `[sets]` table names source lists that documents include with `@name`.
 - Document keys may be globs. A glob names every matching file, including files
   created later, and a document named by several keys watches the sources of
