@@ -155,7 +155,12 @@ def test_object_ids_hash_a_conflicted_file_from_the_working_tree(
     with pytest.raises(subprocess.CalledProcessError):
         git(root, "merge", "-q", "other")
 
-    assert object_ids(root) == {"notes.txt": _blob_id(root, notes.read_bytes())}
+    ids = object_ids(root)
+
+    # Git's filters apply, so line endings do not change the id.
+    assert ids == {"notes.txt": git(root, "hash-object", "--", "notes.txt")}
+    sides = {git(root, "rev-parse", f":{stage}:notes.txt") for stage in (1, 2, 3)}
+    assert ids["notes.txt"] not in sides
 
 
 def test_object_ids_apply_line_ending_conversion(empty_repository: Path) -> None:
