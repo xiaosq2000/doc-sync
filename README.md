@@ -3,9 +3,24 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-Docstale finds documents that may need review after source files change. It
-uses a repository configuration, a committed record of reviews, and Git. It
-does not call an LLM or guess what the source change means.
+Docstale reports documents that may be out of date. You map each document to
+the source files it describes and stamp the document after you review it.
+Docstale then reports every document whose sources changed after its stamp. It
+uses a TOML file, a committed lockfile, and Git. It does not call an LLM or
+guess what a change means.
+
+## How it works
+
+| Piece | Role |
+| --- | --- |
+| `docstale.toml` | Maps each document to the source patterns it depends on |
+| `docstale.lock` | Records a fingerprint of each document's sources at its last review |
+| `docstale check` | Reports documents whose sources changed since their stamp |
+| `docstale stamp` | Records that you reviewed a document |
+| `docstale hook` | Reminds Claude Code or Codex about documents that went stale during a session |
+
+You commit the lock, so an agent, a pre-commit hook, CI, and other people all
+get the same answer from the same files.
 
 ## Install
 
@@ -15,35 +30,38 @@ Docstale requires Python 3.11 or newer and Git.
 uv tool install git+https://github.com/xiaosq2000/docstale.git
 ```
 
-You can also use `pipx`:
+You can also run `pipx install git+https://github.com/xiaosq2000/docstale.git`.
+The [installation guide](docs/installation.md) covers source installs, upgrades,
+moving from doc-sync, and removal.
 
-```bash
-pipx install git+https://github.com/xiaosq2000/docstale.git
-```
+## Quick start
 
-See the [installation guide](docs/installation.md) for source installs,
-upgrades, and removal.
+1. Create `docstale.toml` at the repository root:
+
+   ```toml
+   [documents]
+   "README.md" = ["src/", "pyproject.toml"]
+   "docs/api.md" = ["src/api/"]
+   ```
+
+2. Make sure each document is accurate, then stamp them all and commit the lock:
+
+   ```bash
+   docstale stamp --all
+   git add docstale.toml docstale.lock
+   ```
+
+3. After later changes, run `docstale check`. Review each document it lists,
+   update the document if needed, and run `docstale stamp <document>`.
+
+4. Optionally add the [agent hook](#add-the-agent-hook), the
+   [reviewer subagent](#review-with-a-subagent), and a
+   [pre-commit or CI gate](#gate-commits-and-pull-requests).
 
 ## Configure documents
 
-Create `docstale.toml` at the repository root. Each key in `[documents]` names
-a document, and its value lists the source patterns that may affect it.
-
-```toml
-[documents]
-"README.md" = [
-  "src/**",
-  "pyproject.toml",
-]
-
-"docs/api.md" = [
-  "src/api/**",
-]
-```
-
-`docstale check` reports a document when the files its sources match have
-changed since its last review was stamped. The [Stop hook](#add-a-stop-hook)
-reports the documents whose sources changed during an agent session.
+Each key in `[documents]` names a document, and its value lists the source
+patterns that may affect it.
 
 ### Source patterns
 
@@ -102,9 +120,6 @@ already covers.
 
 ## Check and stamp documents
 
-`docstale.lock` records a fingerprint of each document's sources at its last
-review. Commit it together with the documents and sources it describes.
-
 ```bash
 docstale check
 docstale stamp README.md
@@ -117,6 +132,12 @@ never stamped. The command always prints a result. It exits `0` when no document
 needs review, `2` when review is required, and `1` for configuration or Git
 errors.
 
+`check` also validates the configuration. It fails when an exact document does
+not exist or a glob key matches no document. Sources that match no file and sets
+that no document uses produce warnings on stderr without changing the exit
+code, so a shared configuration can refer to files that exist only on another
+branch.
+
 After you review a document, and update it if needed, record the review with
 `docstale stamp` and the document's repository-relative path. Editing a document
 does not record a review. `stamp --all` stamps every document, which is how a
@@ -124,13 +145,12 @@ repository starts using the lock. Every stamp also drops entries for documents
 that are no longer configured.
 
 A fingerprint covers the Git object id of every file that the document's sources
-match, except the document itself. It is the same on every clone and platform,
-so a pre-commit hook, CI, and other people all get the same answer. Reverting a
-source change makes the document current again.
+match, except the document itself. It is the same on every clone and platform.
+Reverting a source change makes the document current again.
 
-Entries are separated by blank lines, so stamps of different documents merge
-cleanly. When a merge leaves an entry in conflict, `check` reports that document
-and `stamp` rewrites the file.
+Entries in `docstale.lock` are separated by blank lines, so stamps of different
+documents merge cleanly. When a merge leaves an entry in conflict, `check`
+reports that document and `stamp` rewrites the file.
 
 Use `--json` for scripts:
 
@@ -153,13 +173,7 @@ committed yet, it is the commit at `HEAD`. `sources` lists the matched files tha
 changed since that commit. A document that was never stamped has `stamped` set
 to `false`, `since` set to `null`, and no sources.
 
-`check` also validates the configuration. It fails when an exact document does
-not exist or a glob key matches no document. Sources that match no file and sets
-that no document uses produce warnings on stderr without changing the exit
-code, so a shared configuration can refer to files that exist only on another
-branch.
-
-## Add a Stop hook
+## Add the agent hook
 
 Claude Code and Codex use the same `docstale hook` command. Add the following
 SessionStart and Stop entries to `.claude/settings.json` or `.codex/hooks.json`,
@@ -218,10 +232,9 @@ committing existing edits alone does not trigger a reminder. Restoring the
 sources to their starting state removes the document from the reminder.
 
 If a baseline is missing, corrupt, or from an unsupported version, the hook
-saves the current fingerprints and stays silent. Existing installations should
-add the SessionStart entry and start a new session to detect edits in the first
-response. With only Stop configured, the first Stop establishes the baseline,
-and only later edits can trigger a reminder.
+saves the current fingerprints and stays silent. With only Stop configured, the
+first Stop establishes the baseline, and only later edits can trigger a
+reminder.
 
 The agent protocol marks a continuation with `stop_hook_active`. Docstale lets
 that continuation stop without running another check. It also remembers the
@@ -232,6 +245,11 @@ Baselines and acknowledgements live separately under
 `git rev-parse --git-path docstale`. They contain document fingerprints, not
 file contents. Clearing an acknowledgement preserves the baseline. No state file
 enters the working tree, and linked worktrees have separate state.
+
+To switch the hook off or on for the current checkout only, run
+`docstale disable` or `docstale enable`. Manual `check` and `stamp` commands
+still run while the hook is disabled. The switch is stored beside the hook state
+under Git metadata.
 
 ## Review with a subagent
 
@@ -274,28 +292,34 @@ The main agent stamps `unaffected` documents, updates and then stamps
 `affected` ones, and asks you about `unsure` ones. A small model keeps each
 review cheap, and every stamp stays visible in the `docstale.lock` diff.
 
-## Disable the Stop hook locally
+## Gate commits and pull requests
 
-Disable or enable only the automatic Stop hook for the current checkout:
+The repository publishes a `docstale` pre-commit hook. It runs `docstale check`,
+which blocks a commit while a document needs review or the configuration is
+invalid. It does not receive changed filenames.
 
-```bash
-docstale disable
-docstale enable
+```yaml
+repos:
+  - repo: https://github.com/xiaosq2000/docstale
+    rev: <commit>
+    hooks:
+      - id: docstale
 ```
-
-Manual `check` and `stamp` commands still run while the hook is disabled. The
-switch is local to one checkout and is stored beside acknowledgement state under
-Git metadata.
-
-## Pre-commit
-
-The repository publishes a `docstale` pre-commit hook. It runs
-`docstale check`, which blocks a commit while a document needs review or the
-configuration is invalid. It does not receive changed filenames.
 
 Pre-commit sets unstaged changes aside while hooks run, so stage
 `docstale.lock` with the rest of the commit. It also hides the warnings of a
 passing hook unless the hook sets `verbose: true`.
+
+In CI, run the same check after checking out the repository:
+
+```yaml
+- uses: astral-sh/setup-uv@v6
+- run: uvx --from git+https://github.com/xiaosq2000/docstale.git docstale check
+```
+
+A shallow checkout gives the right result. The report lists changed sources
+only when the history includes the commit that recorded each stamp, so use
+`fetch-depth: 0` if you want that list.
 
 ## License
 

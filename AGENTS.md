@@ -25,7 +25,7 @@ step. Keep tool upgrades deliberate and fix new findings in the same change.
 
 ## Hook invariants
 
-The [README hook section](README.md#add-a-stop-hook) defines session behavior,
+The [README hook section](README.md#add-the-agent-hook) defines session behavior,
 error handling, and setup.
 
 - Return immediately when `stop_hook_active` is true, before accessing Git,

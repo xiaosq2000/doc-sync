@@ -41,6 +41,23 @@ pipx upgrade docstale
 Docstale does not edit agent configuration. A command change therefore requires
 you to update the Stop entry in `.claude/settings.json` or `.codex/hooks.json`.
 
+## Move from doc-sync
+
+Docstale is the new name of doc-sync, and it reads only its own files. To move a
+repository:
+
+1. Run `git mv doc-sync.toml docstale.toml`. Rename `doc-sync.lock` to
+   `docstale.lock` the same way if it exists.
+2. Replace `doc-sync hook` with `docstale hook` in `.claude/settings.json` and
+   `.codex/hooks.json`.
+3. Replace `doc-sync validate` with `docstale check`, and replace the
+   `doc-sync-validate` or `doc-sync-check` pre-commit hook with `docstale`.
+4. Uninstall doc-sync, install docstale, and run `docstale stamp --all` if the
+   repository has no lock yet.
+
+Docstale ignores hook state under `git rev-parse --git-path doc-sync`, so you can
+delete that directory.
+
 ## Remove docstale
 
 First, remove the `docstale hook` entry from every agent configuration where
