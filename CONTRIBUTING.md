@@ -20,11 +20,21 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv run ty check
+uv run docstale check
 ```
 
 Ruff selects every rule, and ty treats every rule as an error. Both tools are
 pinned in `uv.lock` and bounded in `pyproject.toml`. Upgrade them deliberately
 and fix new findings in the same change.
+
+## Documents
+
+The repository runs docstale on itself. `docstale.toml` maps each document to
+the code it describes, and CI runs `uv run docstale check`. After a change, run
+that command, review each document it lists, update the document if needed, and
+stamp it with `uv run docstale stamp <document>`. The agent hooks in `.claude/`
+and `.codex/` run the development build from `.venv`, so run `uv sync
+--all-groups` before starting an agent.
 
 ## Architecture
 
@@ -37,6 +47,7 @@ fingerprints in `docstale.lock`.
 - `paths.py` normalizes paths and compiles anchored source patterns.
 - `match.py` contains the pure matching and fingerprint functions.
 - `lock.py` reads and writes `docstale.lock`.
+- `render.py` writes the review report and the hook reminder.
 - `git.py` discovers the repository, changed paths, and Git object ids.
 - `hook.py` parses the shared Claude Code and Codex Stop protocol.
 - `state.py` stores session fingerprints, reminder state, and the local disable

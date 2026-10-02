@@ -13,6 +13,10 @@ Local tests use temporary fixtures and Git repositories. You may run checks and
 fix failures caused by the requested change without asking for approval at each
 step. Keep tool upgrades deliberate and fix new findings in the same change.
 
+This repository runs docstale on itself. Before finishing a change, review each
+document that `uv run docstale check` lists, update it if needed, and stamp it.
+Stamp a document only after reading it against the changed sources.
+
 ## Code boundaries
 
 - Keep `match.py` and `Config.resolve()` free of Git, file access, hook input,

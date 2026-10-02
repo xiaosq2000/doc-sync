@@ -1,0 +1,32 @@
+# Documents that describe docstale, and the sources that can make them stale.
+# After a change, review the documents that `uv run docstale check` lists,
+# update them if needed, and stamp them.
+
+[sets]
+package = ["src/docstale/", "pyproject.toml"]
+
+[documents]
+"README.md" = [
+  "@package",
+  ".claude/agents/docstale-reviewer.md",
+  ".pre-commit-hooks.yaml",
+]
+
+"AGENTS.md" = ["@package", "tests/conftest.py"]
+
+"CONTRIBUTING.md" = ["@package", ".github/workflows/"]
+
+"SECURITY.md" = [
+  "src/docstale/fsutil.py",
+  "src/docstale/git.py",
+  "src/docstale/lock.py",
+  "src/docstale/state.py",
+]
+
+"docs/installation.md" = [
+  "pyproject.toml",
+  "src/docstale/cli.py",
+  "src/docstale/config.py",
+  "src/docstale/lock.py",
+  "src/docstale/state.py",
+]

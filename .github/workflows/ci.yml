@@ -45,6 +45,8 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run ty check
+      # The repository runs docstale on its own documents.
+      - run: uv run docstale check
 
   distribution:
     runs-on: ubuntu-latest
