@@ -42,6 +42,8 @@ Semantic Versioning after its first stable release.
 
 - `check --staged` and `check --base`. The lock gives one answer for the
   repository state, so there is no diff to select.
+- The JSON schema for the configuration. No test kept it in step with the
+  loader.
 
 ## 0.1.0a2
 
