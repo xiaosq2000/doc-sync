@@ -26,9 +26,8 @@ upgrades, and removal.
 
 ## Configure documents
 
-Create `doc-sync.toml` at the repository root. Each key in `[documents]` is an
-exact document path. Its value is a list of source patterns that may affect the
-document.
+Create `doc-sync.toml` at the repository root. Each key in `[documents]` names
+a document, and its value lists the source patterns that may affect it.
 
 ```toml
 [documents]
@@ -45,6 +44,8 @@ document.
 When a source pattern matches a changed file and the document is unchanged,
 doc-sync asks for a review. A changed document needs no further review.
 
+### Source patterns
+
 Source patterns are relative to the repository root and are case sensitive.
 
 - `pyproject.toml` matches one root file.
@@ -56,8 +57,47 @@ Every pattern is anchored to the repository root. For example, `src/` does not
 match `vendor/src/`. Use an explicit `**/` prefix when a pattern should match at
 any depth.
 
-Documents must be exact paths. Document globs are not accepted because every
-result must name a concrete file.
+A directory pattern without glob characters, such as `vendor/lib/`, also
+matches a submodule or symlink at that path. A submodule counts as changed when
+its commit changes, not when files inside it are edited.
+
+### Shared source lists
+
+A `[sets]` table names a source list once so that several documents can include
+it. A source written as `@name` inserts the set with that name.
+
+```toml
+[sets]
+build = ["pixi.toml", "pyproject.toml"]
+
+[documents]
+"README.md" = ["@build", "src/"]
+"docs/development.md" = ["@build", "scripts/"]
+```
+
+Set names use lowercase letters, digits, `-`, and `_`. A set cannot include
+another set. Write `./@name` for a root path that starts with `@`.
+
+### Document globs and directory templates
+
+A key that contains `*`, `?`, or `[` is a glob. It names every matching file
+that Git tracks, plus untracked files that Git does not ignore. Files created
+later are included automatically, and each result is still a concrete document.
+A source that starts with `{dir}` is relative to the directory of each document.
+
+```toml
+[documents]
+"packages/*/README.md" = ["{dir}/"]
+"packages/*/docs/architecture.md" = ["{dir}/../src/"]
+```
+
+Each package README watches its own package, and each architecture document
+watches the `src` directory beside its `docs` directory. A template cannot climb
+above the repository root.
+
+When several keys name the same document, the document watches the sources of
+all of them. An exact key can therefore add sources to a document that a glob
+already covers.
 
 ## Check changes
 
@@ -86,14 +126,16 @@ Use `--json` for scripts:
 }
 ```
 
-Validate the configuration and require every document to exist:
+Validate the configuration:
 
 ```bash
 doc-sync validate
 ```
 
-Source patterns do not have to match a file on the current branch. A shared
-configuration can therefore refer to files that exist only on another branch.
+Validation fails when an exact document does not exist or a glob key matches no
+document. Sources that match no file and sets that no document uses produce
+warnings on stderr, and the command still exits `0`. A shared configuration can
+therefore refer to files that exist only on another branch.
 
 ## Add a Stop hook
 
@@ -183,7 +225,8 @@ under Git metadata.
 ## Pre-commit
 
 The repository publishes a `doc-sync-validate` pre-commit hook. It runs
-`doc-sync validate` and does not receive changed filenames.
+`doc-sync validate` and does not receive changed filenames. Pre-commit hides the
+warnings of a passing hook unless the hook sets `verbose: true`.
 
 ## License
 

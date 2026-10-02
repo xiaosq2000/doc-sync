@@ -14,6 +14,7 @@ from doc_sync.git import git_metadata_path, worktree_paths
 from doc_sync.paths import SourcePattern, normalize_path
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
     from doc_sync.config import Document
@@ -151,14 +152,19 @@ class BaselineStore:
 
 
 def session_changed_paths(
-    *, root: Path, baseline: dict[str, str], documents: tuple[Document, ...]
+    *,
+    root: Path,
+    baseline: dict[str, str],
+    documents: tuple[Document, ...],
+    paths: Iterable[str],
 ) -> tuple[str, ...]:
     """Compare relevant file contents with their state at session start."""
     targets = {document.path for document in documents}
     patterns = tuple(
-        SourcePattern(source) for document in documents for source in document.sources
+        SourcePattern(source)
+        for source in {source for document in documents for source in document.sources}
     )
-    candidates = baseline.keys() | set(worktree_paths(root))
+    candidates = baseline.keys() | set(paths)
     changed: list[str] = []
     for path in sorted(candidates):
         normalized = normalize_path(path)

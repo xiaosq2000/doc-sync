@@ -19,6 +19,7 @@ from doc_sync.git import (
     changed_staged_paths,
     changed_worktree_paths,
     resolve_root,
+    worktree_paths,
 )
 from doc_sync.hook import HookContext, blocking_output, parse_context
 from doc_sync.match import Review, evaluate
@@ -64,7 +65,8 @@ def _write_json(value: object) -> None:
 def _run_check(*, staged: bool, base: str | None, json_output: bool) -> int:
     root = resolve_root()
     config = load_config(root / CONFIG_FILENAME)
-    reviews = evaluate(config.documents, _changed_paths(root, staged=staged, base=base))
+    documents = config.resolve(worktree_paths(root))
+    reviews = evaluate(documents, _changed_paths(root, staged=staged, base=base))
     if json_output:
         _write_json(_payload(reviews))
     elif reviews:
@@ -77,7 +79,10 @@ def _run_check(*, staged: bool, base: str | None, json_output: bool) -> int:
 def _run_validate() -> int:
     root = resolve_root()
     path = root / CONFIG_FILENAME
-    validate_repository_config(root=root, config_path=path)
+    for warning in validate_repository_config(
+        root=root, config_path=path, paths=worktree_paths(root)
+    ):
+        print(f"doc-sync warning: {warning}", file=sys.stderr)
     print(f"valid {path}")
     return 0
 
@@ -99,9 +104,13 @@ def _hook_reviews(*, root: Path, context: HookContext) -> tuple[Review, ...] | N
         return None
     if context.hook_event_name == "SessionStart":
         return None
+    paths = worktree_paths(root)
+    documents = config.resolve(paths)
     reviews = evaluate(
-        config.documents,
-        session_changed_paths(root=root, baseline=baseline, documents=config.documents),
+        documents,
+        session_changed_paths(
+            root=root, baseline=baseline, documents=documents, paths=paths
+        ),
     )
     if not reviews:
         store.clear(session_id)

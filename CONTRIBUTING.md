@@ -31,7 +31,8 @@ and fix new findings in the same change.
 Doc-sync has one job. It maps changed source paths to unchanged documents from
 the `[documents]` table in `doc-sync.toml`.
 
-- `config.py` parses the configuration and validates document targets.
+- `config.py` parses the configuration, expands document globs, sets, and
+  `{dir}`, and validates document targets.
 - `paths.py` normalizes paths and compiles anchored source patterns.
 - `match.py` contains the pure matching function.
 - `git.py` discovers the repository and changed paths.

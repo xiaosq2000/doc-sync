@@ -5,6 +5,25 @@ Semantic Versioning after its first stable release.
 
 ## Unreleased
 
+### Added
+
+- A `[sets]` table names source lists that documents include with `@name`.
+- Document keys may be globs. A glob names every matching file, including files
+  created later, and a document named by several keys watches the sources of
+  all of them.
+- A source that starts with `{dir}` is relative to the document's directory.
+- `validate` warns about sources that match no file and sets that no document
+  uses. It still exits `0`.
+
+### Changed
+
+- A directory pattern without glob characters also matches a submodule or
+  symlink at that path. `check` counts a submodule when its commit changes and
+  ignores edits inside it.
+- `validate` fails when a glob key matches no document.
+- A source that starts with `@` names a set. Write `./@name` for a root path
+  that starts with `@`.
+
 ## 0.1.0a2
 
 ### Changed

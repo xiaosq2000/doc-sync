@@ -42,16 +42,22 @@ def relative_path_error(location: str, raw_path: str, normalized: str) -> str | 
 
 
 class SourcePattern:
-    """A configured source pattern compiled once for repeated matching."""
+    """A normalized source pattern compiled once for repeated matching."""
 
-    __slots__ = ("_pattern",)
+    __slots__ = ("_directory", "_pattern")
 
     def __init__(self, pattern: str) -> None:
-        """Compile one repository-relative source pattern."""
-        is_directory = pattern.endswith("/")
-        normalized = normalize_path(pattern, keep_trailing_slash=is_directory)
+        """Compile one normalized, repository-relative source pattern."""
         self._pattern: GitIgnoreBasicPattern | None = None
-        if not normalized:
+        # A literal directory pattern also names the directory itself, which
+        # Git reports as one path for a submodule or a symlink. A glob or an
+        # escaped pattern cannot tell that path from a file, so it does not.
+        self._directory = (
+            pattern.removesuffix("/")
+            if pattern.endswith("/") and not has_glob(pattern) and "\\" not in pattern
+            else None
+        )
+        if not pattern:
             return
         # Every pattern is anchored to the repository root, which is what the
         # leading `/` means to gitignore. Matching at any depth is opt-in
@@ -59,7 +65,7 @@ class SourcePattern:
         # while `**/app.py` names that file anywhere. Anchoring also makes a
         # leading `!` or `#` an ordinary character rather than gitignore
         # negation or a comment, neither of which doc-sync supports.
-        compiled = GitIgnoreBasicPattern(f"/{normalized}")
+        compiled = GitIgnoreBasicPattern(f"/{pattern}")
         if compiled.include:
             self._pattern = compiled
 
@@ -67,9 +73,13 @@ class SourcePattern:
         """Return whether an already-normalized path matches this pattern."""
         if not normalized_path or self._pattern is None:
             return False
-        return self._pattern.match_file(normalized_path) is not None
+        return (
+            normalized_path == self._directory
+            or self._pattern.match_file(normalized_path) is not None
+        )
 
 
 def match_path(pattern: str, path: str) -> bool:
     """Return whether a repository-relative path matches a source pattern."""
-    return SourcePattern(pattern).matches(normalize_path(path))
+    normalized = normalize_path(pattern, keep_trailing_slash=pattern.endswith("/"))
+    return SourcePattern(normalized).matches(normalize_path(path))

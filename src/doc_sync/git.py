@@ -42,7 +42,13 @@ def resolve_root(raw_root: str | None = None) -> Path:
 def changed_worktree_paths(root: Path) -> tuple[str, ...]:
     """Return staged, unstaged, and untracked non-ignored paths."""
     try:
-        tracked = _nul_paths(_run_git(root, ["diff", "--name-only", "-z", "HEAD"]))
+        # A submodule counts when its commit changes, not when files inside it
+        # are edited.
+        tracked = _nul_paths(
+            _run_git(
+                root, ["diff", "--name-only", "-z", "--ignore-submodules=dirty", "HEAD"]
+            )
+        )
     except GitError:
         # Unborn HEAD: the index is the only thing there is to compare against.
         # Asking first would cost an extra `git` spawn on every agent hook fire.

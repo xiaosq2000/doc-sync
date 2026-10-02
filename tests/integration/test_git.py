@@ -11,7 +11,7 @@ from doc_sync.git import (
     changed_worktree_paths,
     resolve_root,
 )
-from tests.support import commit_all, git
+from tests.support import commit_all, git, initialize_repository
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -57,6 +57,33 @@ def test_preserves_newline_in_file_name(empty_repository: Path) -> None:
     (empty_repository / unusual).write_text("content", encoding="utf-8")
 
     assert changed_worktree_paths(empty_repository) == (unusual,)
+
+
+def test_reports_a_submodule_commit_but_not_edits_inside_it(
+    empty_repository: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    library = tmp_path_factory.mktemp("library")
+    initialize_repository(library)
+    (library / "lib.txt").write_text("one", encoding="utf-8")
+    commit_all(library)
+    git(
+        empty_repository,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        library.as_uri(),
+        "vendor/lib",
+    )
+    commit_all(empty_repository)
+    submodule = empty_repository / "vendor/lib"
+    initialize_repository(submodule)
+
+    (submodule / "lib.txt").write_text("edited", encoding="utf-8")
+    assert changed_worktree_paths(empty_repository) == ()
+
+    commit_all(submodule, "second")
+    assert changed_worktree_paths(empty_repository) == ("vendor/lib",)
 
 
 def test_reports_paths_from_merge_base(empty_repository: Path) -> None:

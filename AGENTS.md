@@ -14,11 +14,13 @@ step. Keep tool upgrades deliberate and fix new findings in the same change.
 
 ## Code boundaries
 
-- Keep `evaluate()` free of Git, file access, hook input, and command output.
+- Keep `evaluate()` and `Config.resolve()` free of Git, file access, hook input,
+  and command output. `cli.py` passes in the repository paths.
 - Route all Git calls through `_run_git()` and human or JSON output through
   `cli.py`.
 - Anchor source patterns to the repository root. Matching at any depth requires
-  `**/`; leading `!` and `#` are literal characters.
+  `**/`, and leading `!` and `#` are literal characters. A leading `@` names a
+  set, and `{dir}` may only start a source.
 
 ## Hook invariants
 

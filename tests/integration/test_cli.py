@@ -5,6 +5,7 @@ import json
 from typing import TYPE_CHECKING
 
 from doc_sync.cli import main
+from tests.support import commit_all, write_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -12,6 +13,17 @@ if TYPE_CHECKING:
     import pytest
 
 BROKEN_CONFIG = "[documents\n"
+PACKAGE_CONFIG = '[documents]\n"packages/*/README.md" = ["{dir}/"]\n'
+
+
+def _package_repository(root: Path) -> Path:
+    """Commit one package with a README that watches its own directory."""
+    (root / "packages/a/src").mkdir(parents=True)
+    (root / "packages/a/README.md").write_text("docs", encoding="utf-8")
+    (root / "packages/a/src/app.py").write_text("v1", encoding="utf-8")
+    (root / "doc-sync.toml").write_text(PACKAGE_CONFIG, encoding="utf-8")
+    commit_all(root)
+    return root / "packages/a/src/app.py"
 
 
 def _hook_payload(
@@ -58,6 +70,22 @@ def test_json_check_has_a_small_stable_contract(
     }
 
 
+def test_check_expands_glob_keys_and_directory_templates(
+    empty_repository: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _package_repository(empty_repository).write_text("v2", encoding="utf-8")
+    monkeypatch.chdir(empty_repository)
+
+    exit_code = main(["check", "--json"])
+
+    assert exit_code == 2
+    assert json.loads(capsys.readouterr().out)["documents"] == [
+        {"path": "packages/a/README.md", "sources": ["packages/a/src/app.py"]}
+    ]
+
+
 def test_check_always_confirms_a_pass(
     repository: Path,
     capsys: pytest.CaptureFixture[str],
@@ -93,6 +121,22 @@ def test_hook_blocks_once_for_the_same_session_state(
     assert "README.md" in json.loads(first_output)["reason"]
     assert second_exit == 0
     assert second_output == ""
+
+
+def test_hook_expands_glob_keys(
+    empty_repository: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _package_repository(empty_repository)
+    _start_session(empty_repository, capsys, monkeypatch)
+    source.write_text("v2", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO(_hook_payload(empty_repository)))
+
+    exit_code = main(["hook"])
+
+    assert exit_code == 0
+    assert "packages/a/README.md" in json.loads(capsys.readouterr().out)["reason"]
 
 
 def test_active_stop_hook_never_blocks_again(
@@ -184,6 +228,26 @@ def test_validate_checks_document_targets(
 
     assert exit_code == 0
     assert capsys.readouterr().out.startswith("valid ")
+
+
+def test_validate_warns_about_unmatched_sources_without_failing(
+    repository: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    write_config(repository, sources=("src/", "gone/"))
+    monkeypatch.chdir(repository)
+
+    exit_code = main(["validate"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.startswith("valid ")
+    (warning,) = captured.err.splitlines()
+    assert warning.startswith("doc-sync warning: ")
+    assert warning.endswith(
+        "doc-sync.toml: document `README.md` source `gone/` matches no file"
+    )
 
 
 def test_manual_error_uses_stderr_and_exit_one(
