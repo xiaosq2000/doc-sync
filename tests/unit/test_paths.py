@@ -35,10 +35,15 @@ from doc_sync.paths import match_path, normalize_path, relative_path_error
         # A bare directory name behaves like the same name with a trailing slash.
         ("src", "src/app.py", True),
         ("src", "src/pkg/app.py", True),
-        # A trailing slash means a directory, so it never matches a file that
-        # happens to carry the directory's name. Git reports changed files, so
-        # this case only arises for a file literally named `src`.
-        ("src/", "src", False),
+        # A literal directory pattern also names the directory itself, which
+        # Git reports as one path for a submodule or a symlink.
+        ("src/", "src", True),
+        ("vendor/lib/", "vendor/lib", True),
+        ("vendor/lib/", "vendor/library", False),
+        # A glob cannot tell such a path from a file, so it matches only what
+        # lies inside the directories it names.
+        ("src/*/", "src/pkg", False),
+        ("src/*/", "src/pkg/app.py", True),
     ],
 )
 def test_match_path(pattern: str, path: str, expected: bool) -> None:

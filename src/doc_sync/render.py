@@ -9,14 +9,31 @@ if TYPE_CHECKING:
 
     from doc_sync.match import Review
 
-CHECK_GUIDANCE = (
+_REVIEW_GUIDANCE = (
     "Review each document and update it if the listed source changes altered "
-    "durable facts."
+    "durable facts.\n"
+    "`git diff <commit> -- <source>` shows a change since the commit in the "
+    "document's heading."
+)
+CHECK_GUIDANCE = (
+    f"{_REVIEW_GUIDANCE}\nThen record the review with `doc-sync stamp <document>`."
 )
 HOOK_GUIDANCE = (
-    f"{CHECK_GUIDANCE}\n"
-    "If no update is needed, stop again without changing the document."
+    f"{_REVIEW_GUIDANCE}\n"
+    "If a `doc-sync-reviewer` subagent is available, run one for each document. "
+    "Update the documents it reports as affected, and ask the user about those "
+    "it is unsure of.\n"
+    "Record each review with `doc-sync stamp <document>`, also when no update is "
+    "needed."
 )
+
+
+def _heading(review: Review) -> str:
+    if not review.stamped:
+        return f"{review.document} (never stamped)"
+    if review.since is not None:
+        return f"{review.document} (changed since {review.since[:12]})"
+    return review.document
 
 
 def build_review_message(
@@ -25,7 +42,7 @@ def build_review_message(
     """Build a review request from pending documents."""
     lines = ["Documentation needs review.", ""]
     for review in reviews:
-        lines.append(review.document)
+        lines.append(_heading(review))
         lines.extend(f"  {source}" for source in review.sources)
     lines.extend(["", guidance])
     return "\n".join(lines)

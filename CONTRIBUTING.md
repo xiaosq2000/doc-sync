@@ -28,18 +28,24 @@ and fix new findings in the same change.
 
 ## Architecture
 
-Doc-sync has one job. It maps changed source paths to unchanged documents from
-the `[documents]` table in `doc-sync.toml`.
+Doc-sync has one job. It reports documents whose sources changed since their
+last recorded review, using the `[documents]` table in `doc-sync.toml` and the
+fingerprints in `doc-sync.lock`.
 
-- `config.py` parses the configuration and validates document targets.
+- `config.py` parses the configuration, expands document globs, sets, and
+  `{dir}`, and validates document targets.
 - `paths.py` normalizes paths and compiles anchored source patterns.
-- `match.py` contains the pure matching function.
-- `git.py` discovers the repository and changed paths.
+- `match.py` contains the pure matching and fingerprint functions.
+- `lock.py` reads and writes `doc-sync.lock`.
+- `git.py` discovers the repository, changed paths, and Git object ids.
 - `hook.py` parses the shared Claude Code and Codex Stop protocol.
-- `state.py` stores private hook acknowledgements and the local disable marker.
-- `cli.py` implements `check`, `validate`, `hook`, `disable`, and `enable`.
+- `state.py` stores session fingerprints, reminder state, and the local disable
+  marker.
+- `cli.py` implements `check`, `stamp`, `validate`, `hook`, `disable`, and
+  `enable`.
 
-Keep `evaluate()` free of Git, file access, hook input, and command output.
+Keep `match.py` and `Config.resolve()` free of Git, file access, hook input,
+and command output.
 Internal Python classes are implementation details and are not a public API.
 
 ## Contracts

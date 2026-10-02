@@ -4,8 +4,8 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 Doc-sync finds documents that may need review after source files change. It
-uses a repository configuration and Git. It does not call an LLM or guess what
-the source change means.
+uses a repository configuration, a committed record of reviews, and Git. It
+does not call an LLM or guess what the source change means.
 
 ## Install
 
@@ -26,9 +26,8 @@ upgrades, and removal.
 
 ## Configure documents
 
-Create `doc-sync.toml` at the repository root. Each key in `[documents]` is an
-exact document path. Its value is a list of source patterns that may affect the
-document.
+Create `doc-sync.toml` at the repository root. Each key in `[documents]` names
+a document, and its value lists the source patterns that may affect it.
 
 ```toml
 [documents]
@@ -42,8 +41,11 @@ document.
 ]
 ```
 
-When a source pattern matches a changed file and the document is unchanged,
-doc-sync asks for a review. A changed document needs no further review.
+`doc-sync check` reports a document when the files its sources match have
+changed since its last review was stamped. The [Stop hook](#add-a-stop-hook)
+reports the documents whose sources changed during an agent session.
+
+### Source patterns
 
 Source patterns are relative to the repository root and are case sensitive.
 
@@ -56,21 +58,79 @@ Every pattern is anchored to the repository root. For example, `src/` does not
 match `vendor/src/`. Use an explicit `**/` prefix when a pattern should match at
 any depth.
 
-Documents must be exact paths. Document globs are not accepted because every
-result must name a concrete file.
+A directory pattern without glob characters, such as `vendor/lib/`, also
+matches a submodule or symlink at that path. A submodule counts as changed when
+its commit changes, not when files inside it are edited.
 
-## Check changes
+### Shared source lists
 
-Run a check against the working tree, staged files, or a merge base:
+A `[sets]` table names a source list once so that several documents can include
+it. A source written as `@name` inserts the set with that name.
+
+```toml
+[sets]
+build = ["pixi.toml", "pyproject.toml"]
+
+[documents]
+"README.md" = ["@build", "src/"]
+"docs/development.md" = ["@build", "scripts/"]
+```
+
+Set names use lowercase letters, digits, `-`, and `_`. A set cannot include
+another set. Write `./@name` for a root path that starts with `@`.
+
+### Document globs and directory templates
+
+A key that contains `*`, `?`, or `[` is a glob. It names every matching file
+that Git tracks, plus untracked files that Git does not ignore. Files created
+later are included automatically, and each result is still a concrete document.
+A source that starts with `{dir}` is relative to the directory of each document.
+
+```toml
+[documents]
+"packages/*/README.md" = ["{dir}/"]
+"packages/*/docs/architecture.md" = ["{dir}/../src/"]
+```
+
+Each package README watches its own package, and each architecture document
+watches the `src` directory beside its `docs` directory. A template cannot climb
+above the repository root.
+
+When several keys name the same document, the document watches the sources of
+all of them. An exact key can therefore add sources to a document that a glob
+already covers.
+
+## Check and stamp documents
+
+`doc-sync.lock` records a fingerprint of each document's sources at its last
+review. Commit it together with the documents and sources it describes.
 
 ```bash
 doc-sync check
-doc-sync check --staged
-doc-sync check --base origin/main
+doc-sync stamp README.md
+doc-sync stamp --all
 ```
 
-A manual check always prints a result. It exits `0` when no document needs
-review, `2` when review is required, and `1` for configuration or Git errors.
+`check` compares each document's current fingerprint with the lock. A document
+needs review when its sources have changed since it was stamped, or when it was
+never stamped. The command always prints a result. It exits `0` when no document
+needs review, `2` when review is required, and `1` for configuration or Git
+errors.
+
+After you review a document, and update it if needed, record the review with
+`doc-sync stamp` and the document's repository-relative path. Editing a document
+does not record a review. `stamp --all` stamps every document, which is how a
+repository starts using the lock. Every stamp also drops entries for documents
+that are no longer configured.
+
+A fingerprint covers the Git object id of every file that the document's sources
+match, except the document itself. It is the same on every clone and platform,
+so a pre-commit hook, CI, and other people all get the same answer. Reverting a
+source change makes the document current again.
+
+Entries are separated by blank lines, so stamps of different documents merge
+cleanly. When a merge leaves an entry in conflict, `check` reports that document
+and `stamp` rewrites the file.
 
 Use `--json` for scripts:
 
@@ -79,21 +139,30 @@ Use `--json` for scripts:
   "documents": [
     {
       "path": "README.md",
-      "sources": ["src/client.py"]
+      "since": "9c1b2e7d41f0a3c2b5e8d6f4a1c0b9e8d7f6a5c4",
+      "sources": ["src/client.py"],
+      "stamped": true
     }
   ],
   "status": "review_required"
 }
 ```
 
-Validate the configuration and require every document to exist:
+`since` is the commit that recorded the current stamp. For a stamp that is not
+committed yet, it is the commit at `HEAD`. `sources` lists the matched files that
+changed since that commit. A document that was never stamped has `stamped` set
+to `false`, `since` set to `null`, and no sources.
+
+Validate the configuration:
 
 ```bash
 doc-sync validate
 ```
 
-Source patterns do not have to match a file on the current branch. A shared
-configuration can therefore refer to files that exist only on another branch.
+Validation fails when an exact document does not exist or a glob key matches no
+document. Sources that match no file and sets that no document uses produce
+warnings on stderr, and the command still exits `0`. A shared configuration can
+therefore refer to files that exist only on another branch.
 
 ## Add a Stop hook
 
@@ -139,33 +208,76 @@ broken configuration returns a continuation message at Stop so the agent can
 report or fix it. SessionStart failures are reported on stderr without blocking
 the session.
 
-SessionStart saves a baseline of tracked and non-ignored untracked files. Stop
-checks for changes since that baseline, so pre-existing edits do not trigger a
-reminder when the agent only reads files or answers questions. A document edited
-before the session does not suppress review of source changes made during the
-session. The baseline is preserved when the same session resumes or compacts.
+SessionStart saves a baseline with the fingerprint of every document. At Stop,
+the hook asks for a review of each document whose fingerprint differs from both
+the lock and the baseline. A document that already needed review when the
+session started is left to `doc-sync check`, so a session that only reads files
+or answers questions gets no reminder. The reminder lists every source that
+changed since the document was stamped, and stamping the document clears it.
+The baseline is preserved when the same session resumes or compacts.
 
 Changes made by you or other tools in the same checkout during the session also
-count. Committing session edits does not hide them from the hook. Staging or
-committing existing edits alone does not trigger a reminder. Restoring a file to
-its starting state removes it from the session's changes.
+count, and so does a configuration change that alters a document's matched
+files. Committing session edits does not hide them from the hook. Staging or
+committing existing edits alone does not trigger a reminder. Restoring the
+sources to their starting state removes the document from the reminder.
 
 If a baseline is missing, corrupt, or from an unsupported version, the hook
-saves the current state and stays silent. Existing installations should add the
-SessionStart entry and start a new session to detect edits in the first
+saves the current fingerprints and stays silent. Existing installations should
+add the SessionStart entry and start a new session to detect edits in the first
 response. With only Stop configured, the first Stop establishes the baseline,
 and only later edits can trigger a reminder.
 
 The agent protocol marks a continuation with `stop_hook_active`. Doc-sync lets
 that continuation stop without running another check. It also remembers the
-last review shown in each session, so unchanged source state does not produce a
-reminder on every later turn. A change to a relevant source, document, or
-configuration produces a new reminder.
+fingerprint at which it last reported each document in a session, so a document
+is reported again only after its sources change again.
 
 Baselines and acknowledgements live separately under
-`git rev-parse --git-path doc-sync`. Baselines contain file fingerprints, not
-file contents. Clearing an acknowledgement preserves the baseline. No state
-file enters the working tree, and linked worktrees have separate state.
+`git rev-parse --git-path doc-sync`. They contain document fingerprints, not
+file contents. Clearing an acknowledgement preserves the baseline. No state file
+enters the working tree, and linked worktrees have separate state.
+
+## Review with a subagent
+
+The hook reminder suggests a `doc-sync-reviewer` subagent when the agent has
+one. The subagent reads the source diff and the document and reports whether
+the document needs an update. It does not edit files or stamp documents, so the
+main agent stays responsible for both. Without the subagent, the main agent
+reviews each document itself.
+
+For Claude Code, save the following as `.claude/agents/doc-sync-reviewer.md`:
+
+```markdown
+---
+name: doc-sync-reviewer
+description: Decides whether source changes require an update to one document that doc-sync reported. Use once for each reported document.
+tools: Read, Grep, Glob, Bash
+model: haiku
+---
+
+You review one document that doc-sync reported. You receive the document path,
+the commit in its heading, and its changed sources. A document that was never
+stamped has no commit to compare with, so answer `unsure` for it.
+
+1. Run `git diff <commit> -- <sources>`. Read any listed source that the diff
+   does not show, such as a new file.
+2. Read the document.
+3. Decide whether the changes make any statement in the document wrong or
+   incomplete.
+
+Answer with one verdict on the first line, followed by at most three lines:
+
+- `unaffected` when nothing in the document needs to change.
+- `affected`, followed by each section that is now wrong and why.
+- `unsure`, followed by what you could not decide.
+
+Do not edit files and do not run `doc-sync stamp`.
+```
+
+The main agent stamps `unaffected` documents, updates and then stamps
+`affected` ones, and asks you about `unsure` ones. A small model keeps each
+review cheap, and every stamp stays visible in the `doc-sync.lock` diff.
 
 ## Disable the Stop hook locally
 
@@ -176,14 +288,24 @@ doc-sync disable
 doc-sync enable
 ```
 
-Manual `check` and `validate` commands still run while the hook is disabled.
+Manual `check`, `stamp`, and `validate` commands still run while the hook is
+disabled.
 The switch is local to one checkout and is stored beside acknowledgement state
 under Git metadata.
 
 ## Pre-commit
 
-The repository publishes a `doc-sync-validate` pre-commit hook. It runs
-`doc-sync validate` and does not receive changed filenames.
+The repository publishes two pre-commit hooks. Neither receives changed
+filenames.
+
+| Hook | Command | Use |
+| --- | --- | --- |
+| `doc-sync-validate` | `doc-sync validate` | Catch configuration errors |
+| `doc-sync-check` | `doc-sync check` | Block commits while documents need review |
+
+Pre-commit sets unstaged changes aside while hooks run, so stage
+`doc-sync.lock` with the rest of the commit. It also hides the warnings of a
+passing hook unless the hook sets `verbose: true`.
 
 ## License
 

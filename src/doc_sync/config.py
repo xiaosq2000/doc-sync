@@ -1,20 +1,26 @@
-"""Load and validate doc-sync configuration."""
+"""Load, validate, and resolve doc-sync configuration."""
 
 from __future__ import annotations
 
+import re
 import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from doc_sync.errors import DocSyncError
-from doc_sync.paths import has_glob, normalize_path, relative_path_error
+from doc_sync.paths import SourcePattern, has_glob, normalize_path, relative_path_error
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
     from pathlib import Path
 
 CONFIG_FILENAME = "doc-sync.toml"
-_ROOT_KEYS = {"documents"}
+DIRECTORY = "{dir}"
+_ROOT_KEYS = {"documents", "sets"}
+_SET_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
+# Characters that gitignore syntax would not read literally in a directory name.
+_SPECIAL = re.compile(r"([\\*?\[\] ])")
 
 
 class ConfigError(DocSyncError, ValueError):
@@ -34,10 +40,122 @@ class Document:
 
 
 @dataclass(frozen=True)
+class Entry:
+    """One `[documents]` key with its sources and set names as written."""
+
+    key: str
+    sources: tuple[str, ...]
+    set_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Config:
     """Validated doc-sync configuration."""
 
-    documents: tuple[Document, ...]
+    entries: tuple[Entry, ...]
+    sets: dict[str, tuple[str, ...]]
+
+    def resolve(self, paths: Iterable[str]) -> tuple[Document, ...]:
+        """Expand document globs, sets, and `{dir}` against repository paths."""
+        sources: dict[str, set[str]] = {}
+        for _origin, document, pattern in self._expand(_candidates(paths)):
+            sources.setdefault(document, set()).add(pattern)
+        return tuple(
+            Document(path=path, sources=tuple(sorted(patterns)))
+            for path, patterns in sorted(sources.items())
+        )
+
+    def unmatched_sources(self, paths: Iterable[str]) -> tuple[str, ...]:
+        """Describe each configured source that matches no repository path."""
+        candidates = _candidates(paths)
+        patterns: dict[str, set[str]] = {}
+        for origin, _document, pattern in self._expand(candidates):
+            patterns.setdefault(origin, set()).add(pattern)
+        unique = {pattern for found in patterns.values() for pattern in found}
+        matched = {pattern: _matches_any(pattern, candidates) for pattern in unique}
+        return tuple(
+            origin
+            for origin, found in patterns.items()
+            if not any(matched[pattern] for pattern in found)
+        )
+
+    def unused_sets(self) -> tuple[str, ...]:
+        """Return the names of sets that no document uses."""
+        used = {name for entry in self.entries for name in entry.set_names}
+        return tuple(name for name in self.sets if name not in used)
+
+    def _expand(self, candidates: tuple[str, ...]) -> Iterator[tuple[str, str, str]]:
+        """Yield the origin, document, and resolved pattern of every source."""
+        for entry in self.entries:
+            origins = [
+                *(
+                    (f"document `{entry.key}` source `{source}`", source)
+                    for source in entry.sources
+                ),
+                *(
+                    (f"set `{name}` source `{source}`", source)
+                    for name in entry.set_names
+                    for source in self.sets[name]
+                ),
+            ]
+            for document in _documents(entry.key, candidates):
+                for origin, source in origins:
+                    yield origin, document, _resolve(source, document)
+
+
+def _candidates(paths: Iterable[str]) -> tuple[str, ...]:
+    return tuple(sorted({normalize_path(path) for path in paths if path}))
+
+
+def _documents(key: str, candidates: tuple[str, ...]) -> tuple[str, ...]:
+    """Return an exact key itself, or every candidate that a glob key matches."""
+    if not has_glob(key):
+        return (key,)
+    pattern = SourcePattern(key)
+    return tuple(path for path in candidates if pattern.matches(path))
+
+
+def _matches_any(pattern: str, candidates: tuple[str, ...]) -> bool:
+    compiled = SourcePattern(pattern)
+    return any(compiled.matches(path) for path in candidates)
+
+
+def _resolve(source: str, document: str) -> str:
+    """Replace a leading `{dir}` with the document's directory."""
+    if not source.startswith(DIRECTORY):
+        return source
+    # Escaping keeps a directory such as `app/[id]` literal inside the pattern.
+    segments = [
+        _SPECIAL.sub(r"\\\1", segment)
+        for segment in document.rpartition("/")[0].split("/")
+        if segment
+    ]
+    for segment in source.removeprefix(DIRECTORY).split("/"):
+        if segment == "..":
+            # Loading rejects templates that climb above the repository root.
+            segments.pop()
+        elif segment:
+            segments.append(segment)
+    if not segments:
+        return "**"
+    return "/".join(segments) + ("/" if source.endswith("/") else "")
+
+
+def _climb(template: str) -> int:
+    """Return how many directories a `{dir}` template climbs above its start."""
+    level = lowest = 0
+    for segment in template.removeprefix(DIRECTORY).split("/"):
+        if segment == "..":
+            level -= 1
+            lowest = min(lowest, level)
+        elif segment:
+            level += 1
+    return -lowest
+
+
+def _depth(key: str) -> int:
+    """Return the fewest directories above any document that a key names."""
+    return sum(segment != "**" for segment in key.split("/")[:-1])
 
 
 def _unknown_keys(config_path: Path, value: dict[str, Any]) -> None:
@@ -47,40 +165,100 @@ def _unknown_keys(config_path: Path, value: dict[str, Any]) -> None:
         raise ConfigError(f"{config_path}: unknown key(s): {rendered}")
 
 
-def _document_path(config_path: Path, raw_path: str) -> str:
-    location = f"{config_path}: document `{raw_path}`"
-    normalized = normalize_path(raw_path)
-    if error := relative_path_error(location, raw_path, normalized):
+def _document_key(config_path: Path, raw_key: str) -> str:
+    location = f"{config_path}: document `{raw_key}`"
+    normalized = normalize_path(raw_key)
+    if error := relative_path_error(location, raw_key, normalized):
         raise ConfigError(error)
-    if raw_path.endswith("/") or has_glob(raw_path):
-        raise ConfigError(f"{location} must be an exact file path")
+    if raw_key.endswith("/"):
+        raise ConfigError(f"{location} must name files, not a directory")
+    if DIRECTORY in normalized:
+        raise ConfigError(f"{location} cannot use `{DIRECTORY}`")
     return normalized
 
 
-def _sources(config_path: Path, document: str, raw_sources: object) -> tuple[str, ...]:
-    location = f"{config_path}: document `{document}`"
+def _source(location: str, raw_source: str) -> str:
+    normalized = normalize_path(
+        raw_source, keep_trailing_slash=raw_source.endswith("/")
+    )
+    template = normalized.startswith(DIRECTORY)
+    rest = normalized.removeprefix(DIRECTORY)
+    if DIRECTORY in rest or (template and rest and not rest.startswith("/")):
+        raise ConfigError(
+            f"{location} may use `{DIRECTORY}` only as its first path segment"
+        )
+    if not template:
+        if error := relative_path_error(location, raw_source, normalized):
+            raise ConfigError(error)
+    elif "." in rest.split("/"):
+        raise ConfigError(f"{location} must not contain `.` segments")
+    return normalized
+
+
+def _source_list(
+    location: str, raw_sources: object, *, sets_allowed: bool
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Validate written sources and separate them from `@name` set references."""
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ConfigError(f"{location} must have a non-empty array of sources")
 
     sources: list[str] = []
+    set_names: list[str] = []
     for index, raw_source in enumerate(raw_sources, start=1):
         source_location = f"{location} source #{index}"
         if not isinstance(raw_source, str) or not raw_source:
             raise ConfigError(f"{source_location} must be a non-empty string")
-        normalized = normalize_path(
-            raw_source, keep_trailing_slash=raw_source.endswith("/")
-        )
-        if error := relative_path_error(source_location, raw_source, normalized):
-            raise ConfigError(error)
-        sources.append(normalized)
+        if not raw_source.startswith("@"):
+            sources.append(_source(source_location, raw_source))
+        elif not sets_allowed:
+            raise ConfigError(f"{source_location} cannot name another set")
+        elif _SET_NAME.fullmatch(raw_source[1:]):
+            set_names.append(raw_source[1:])
+        else:
+            raise ConfigError(
+                f"{source_location} must name a set as `@name`; "
+                f"write `./{raw_source}` for a path"
+            )
 
+    written = [*sources, *(f"@{name}" for name in set_names)]
     duplicates = sorted(
-        source for source, count in Counter(sources).items() if count > 1
+        source for source, count in Counter(written).items() if count > 1
     )
     if duplicates:
         rendered = ", ".join(f"`{source}`" for source in duplicates)
         raise ConfigError(f"{location} contains duplicate source(s): {rendered}")
-    return tuple(sources)
+    return tuple(sources), tuple(set_names)
+
+
+def _sets(config_path: Path, raw_sets: object) -> dict[str, tuple[str, ...]]:
+    if not isinstance(raw_sets, dict):
+        raise ConfigError(f"{config_path}: `sets` must be a table")
+    sets: dict[str, tuple[str, ...]] = {}
+    for name, raw_sources in cast("dict[str, object]", raw_sets).items():
+        location = f"{config_path}: set `{name}`"
+        if not _SET_NAME.fullmatch(name):
+            raise ConfigError(
+                f"{location} must use lowercase letters, digits, `-`, and `_`"
+            )
+        sets[name], _ = _source_list(location, raw_sources, sets_allowed=False)
+    return sets
+
+
+def _entry(
+    config_path: Path, key: str, raw_sources: object, sets: dict[str, tuple[str, ...]]
+) -> Entry:
+    location = f"{config_path}: document `{key}`"
+    sources, set_names = _source_list(location, raw_sources, sets_allowed=True)
+    for name in set_names:
+        if name not in sets:
+            raise ConfigError(f"{location} names unknown set `@{name}`")
+    depth = _depth(key)
+    for source in (*sources, *(item for name in set_names for item in sets[name])):
+        if source.startswith(DIRECTORY) and _climb(source) > depth:
+            raise ConfigError(
+                f"{location} source `{source}` can reach outside the repository"
+            )
+    return Entry(key=key, sources=sources, set_names=set_names)
 
 
 def load_config(config_path: Path) -> Config:
@@ -94,36 +272,48 @@ def load_config(config_path: Path) -> Config:
         raise ConfigError(f"{config_path}: TOML parse error: {exc}") from exc
 
     _unknown_keys(config_path, raw_config)
+    sets = _sets(config_path, raw_config.get("sets", {}))
     raw_documents_value = raw_config.get("documents")
     if not isinstance(raw_documents_value, dict) or not raw_documents_value:
         raise ConfigError(f"{config_path}: expected a non-empty `[documents]` table")
     raw_documents = cast("dict[str, object]", raw_documents_value)
 
-    documents: list[Document] = []
-    seen_paths: set[str] = set()
-    for raw_path, raw_sources in raw_documents.items():
-        path = _document_path(config_path, raw_path)
-        if path in seen_paths:
-            raise ConfigError(f"{config_path}: duplicate document path `{path}`")
-        seen_paths.add(path)
-        documents.append(
-            Document(
-                path=path,
-                sources=_sources(config_path, path, raw_sources),
-            )
-        )
-    return Config(tuple(sorted(documents, key=lambda document: document.path)))
+    entries: list[Entry] = []
+    seen_keys: set[str] = set()
+    for raw_key, raw_sources in raw_documents.items():
+        key = _document_key(config_path, raw_key)
+        if key in seen_keys:
+            raise ConfigError(f"{config_path}: duplicate document key `{key}`")
+        seen_keys.add(key)
+        entries.append(_entry(config_path, key, raw_sources, sets))
+    return Config(entries=tuple(entries), sets=sets)
 
 
-def validate_repository_config(*, root: Path, config_path: Path) -> Config:
-    """Validate configuration and require every document to exist."""
+def validate_repository_config(
+    *, root: Path, config_path: Path, paths: Iterable[str]
+) -> tuple[str, ...]:
+    """Validate configuration against the repository and return warnings.
+
+    Every exact document must exist and every glob key must match a document.
+    Unmatched sources and unused sets are only warnings, because a shared
+    configuration may name files that exist on another branch.
+    """
     config = load_config(config_path)
-    missing = [
-        document.path
-        for document in config.documents
-        if not (root / document.path).is_file()
-    ]
-    if missing:
-        detail = "\n".join(f"  - `{path}` does not exist" for path in missing)
+    candidates = _candidates(paths)
+    problems: list[str] = []
+    for entry in config.entries:
+        if not has_glob(entry.key):
+            if not (root / entry.key).is_file():
+                problems.append(f"  - `{entry.key}` does not exist")
+        elif not _documents(entry.key, candidates):
+            problems.append(f"  - `{entry.key}` matches no document")
+    if problems:
+        detail = "\n".join(problems)
         raise ConfigError(f"{config_path}: invalid documents:\n{detail}")
-    return config
+    return (
+        *(
+            f"{config_path}: {origin} matches no file"
+            for origin in config.unmatched_sources(candidates)
+        ),
+        *(f"{config_path}: set `{name}` is not used" for name in config.unused_sets()),
+    )

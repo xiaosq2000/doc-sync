@@ -1,39 +1,53 @@
 from __future__ import annotations
 
 from doc_sync.config import Document
-from doc_sync.match import Review, evaluate
+from doc_sync.match import (
+    Review,
+    fingerprint,
+    matched_paths,
+    stale_documents,
+)
 from doc_sync.render import build_review_message
 
-
-def test_returns_each_unchanged_document_with_its_changed_sources() -> None:
-    documents = (
-        Document("README.md", ("src/", "pyproject.toml")),
-        Document("docs/api.md", ("src/api/",)),
-    )
-
-    reviews = evaluate(
-        documents,
-        ("src/app.py", "src/api/client.py", "pyproject.toml", "README.md"),
-    )
-
-    assert reviews == (Review("docs/api.md", ("src/api/client.py",)),)
+README = Document("README.md", ("README.md", "src/"))
+IDS = {"README.md": "a1", "src/app.py": "b1", "tests/test_app.py": "c1"}
 
 
-def test_one_source_can_require_several_documents() -> None:
-    documents = (
-        Document("README.md", ("src/",)),
-        Document("docs/api.md", ("src/",)),
-    )
+def test_a_document_never_matches_itself() -> None:
+    assert matched_paths(README, IDS) == ("src/app.py",)
 
-    reviews = evaluate(documents, ("src/app.py",))
 
-    assert tuple(review.document for review in reviews) == (
-        "README.md",
-        "docs/api.md",
-    )
+def test_a_fingerprint_covers_only_matched_sources() -> None:
+    original = fingerprint(README, IDS)
+
+    assert fingerprint(README, {**IDS, "tests/test_app.py": "c2"}) == original
+    assert fingerprint(README, {**IDS, "README.md": "a2"}) == original
+    assert fingerprint(README, {**IDS, "src/app.py": "b2"}) != original
+    assert fingerprint(README, {**IDS, "src/new.py": "d1"}) != original
+    assert len(original) == 16
+
+
+def test_documents_are_stale_until_the_lock_records_their_fingerprint() -> None:
+    api = Document("docs/api.md", ("src/",))
+    lock = {"README.md": fingerprint(README, IDS)}
+
+    assert stale_documents((README, api), IDS, lock) == (api,)
 
 
 def test_message_names_documents_and_sources() -> None:
     message = build_review_message((Review("README.md", ("src/app.py",)),))
 
     assert "README.md\n  src/app.py" in message
+
+
+def test_message_says_since_when_and_whether_a_document_was_stamped() -> None:
+    message = build_review_message(
+        (
+            Review("README.md", ("src/app.py",), since="0123456789abcdef"),
+            Review("docs/api.md", (), stamped=False),
+        )
+    )
+
+    assert "README.md (changed since 0123456789ab)\n  src/app.py" in message
+    assert "docs/api.md (never stamped)" in message
+    assert "doc-sync stamp <document>" in message

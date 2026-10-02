@@ -1,27 +1,22 @@
-"""Private session baselines, acknowledgements, and hook disable state."""
+"""Private session fingerprints, reminder state, and hook disable state."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import re
-import stat
-from pathlib import PurePath
 from typing import TYPE_CHECKING, Any
 
 from doc_sync.fsutil import atomic_write
-from doc_sync.git import git_metadata_path, worktree_paths
-from doc_sync.paths import SourcePattern, normalize_path
+from doc_sync.git import git_metadata_path
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
-    from doc_sync.config import Document
-    from doc_sync.match import Review
-
-STATE_VERSION = 1
-BASELINE_VERSION = 1
-_FINGERPRINT = re.compile(r"(?:file:[01]:[0-9a-f]{64}|symlink:[\s\S]*|missing|other)")
+STATE_VERSION = 2
+BASELINE_VERSION = 2
+_FINGERPRINT = re.compile(r"[0-9a-f]{16}")
 DISABLED_MARKER = "disabled"
 _DISABLED_NOTE = (
     "doc-sync is disabled for this checkout.\n"
@@ -51,64 +46,41 @@ def set_disabled(state_directory: Path, *, disabled: bool) -> bool:
     return True
 
 
-def _session_path(
-    state_directory: Path, session_id: str, *, category: str = "sessions"
-) -> Path:
+def _session_path(state_directory: Path, session_id: str, *, category: str) -> Path:
     digest = hashlib.sha256(session_id.encode()).hexdigest()
     return state_directory / category / f"{digest}.json"
 
 
-def _content_marker(path: Path) -> str:
+def _read_fingerprints(path: Path, version: int) -> dict[str, str] | None:
+    """Read document fingerprints, or None for missing, corrupt, or old data."""
     try:
-        mode = path.lstat().st_mode
-        if stat.S_ISLNK(mode):
-            return f"symlink:{path.readlink()}"
-        if not stat.S_ISREG(mode):
-            return "other"
-        with path.open("rb") as source_file:
-            digest = hashlib.file_digest(source_file, "sha256")
-        executable = int(bool(mode & stat.S_IXUSR))
-        return f"file:{executable}:{digest.hexdigest()}"
-    except (FileNotFoundError, NotADirectoryError):
-        return "missing"
-
-
-def _state_key(*, root: Path, config_path: Path, reviews: tuple[Review, ...]) -> str:
-    relevant_paths = sorted(
-        {path for review in reviews for path in (review.document, *review.sources)}
-    )
-    payload = {
-        "config": _content_marker(config_path),
-        "reviews": [review.to_dict() for review in reviews],
-        "paths": [
-            {"path": path, "content": _content_marker(root / path)}
-            for path in relevant_paths
-        ],
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _read_state(path: Path) -> dict[str, Any] | None:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value: Any = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, UnicodeError):
         return None
-    return value if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or type(value.get("version")) is not int
+        or value["version"] != version
+        or not isinstance(documents := value.get("documents"), dict)
+    ):
+        return None
+    fingerprints: dict[str, str] = {}
+    for document, fingerprint in documents.items():
+        if not isinstance(fingerprint, str) or not _FINGERPRINT.fullmatch(fingerprint):
+            return None
+        fingerprints[document] = fingerprint
+    return fingerprints
 
 
-def _valid_baseline_path(path: str) -> bool:
-    # Baselines are private data, but reject corrupt paths before reading files.
-    relative = PurePath(path)
-    return bool(relative.parts) and not (
-        relative.anchor
-        or "\0" in path
-        or any(part in {"..", ".git"} for part in relative.parts)
+def _write_fingerprints(path: Path, version: int, values: Mapping[str, str]) -> None:
+    content = json.dumps(
+        {"version": version, "documents": dict(values)}, indent=2, sort_keys=True
     )
+    atomic_write(path, content + "\n")
 
 
 class BaselineStore:
-    """Save the initial file state independently of reminder acknowledgements."""
+    """Save document fingerprints at session start, apart from reminder state."""
 
     def __init__(self, state_directory: Path) -> None:
         """Create a store in worktree-specific Git metadata."""
@@ -119,89 +91,41 @@ class BaselineStore:
 
     def load(self, session_id: str) -> dict[str, str] | None:
         """Load a supported baseline, or return None for missing or corrupt data."""
-        value = _read_state(self._path(session_id))
-        if (
-            not value
-            or type(value.get("version")) is not int
-            or value["version"] != BASELINE_VERSION
-        ):
-            return None
-        paths = value.get("paths")
-        if not isinstance(paths, dict):
-            return None
-        fingerprints: dict[str, str] = {}
-        for path, marker in paths.items():
-            if (
-                not isinstance(path, str)
-                or not _valid_baseline_path(path)
-                or not isinstance(marker, str)
-                or _FINGERPRINT.fullmatch(marker) is None
-            ):
-                return None
-            fingerprints[path] = marker
-        return fingerprints
+        return _read_fingerprints(self._path(session_id), BASELINE_VERSION)
 
-    def capture(self, *, session_id: str, root: Path) -> None:
-        """Atomically save fingerprints without storing any file contents."""
-        paths = {path: _content_marker(root / path) for path in worktree_paths(root)}
-        content = json.dumps(
-            {"version": BASELINE_VERSION, "paths": paths}, sort_keys=True
-        )
-        atomic_write(self._path(session_id), content + "\n")
-
-
-def session_changed_paths(
-    *, root: Path, baseline: dict[str, str], documents: tuple[Document, ...]
-) -> tuple[str, ...]:
-    """Compare relevant file contents with their state at session start."""
-    targets = {document.path for document in documents}
-    patterns = tuple(
-        SourcePattern(source) for document in documents for source in document.sources
-    )
-    candidates = baseline.keys() | set(worktree_paths(root))
-    changed: list[str] = []
-    for path in sorted(candidates):
-        normalized = normalize_path(path)
-        if normalized not in targets and not any(
-            pattern.matches(normalized) for pattern in patterns
-        ):
-            continue
-        if _content_marker(root / path) != baseline.get(path, "missing"):
-            changed.append(path)
-    return tuple(changed)
+    def capture(self, *, session_id: str, fingerprints: Mapping[str, str]) -> None:
+        """Atomically save fingerprints, which hold no file contents."""
+        _write_fingerprints(self._path(session_id), BASELINE_VERSION, fingerprints)
 
 
 class AcknowledgementStore:
-    """Remember the last review state shown in each agent session."""
+    """Remember the fingerprint at which each document was last reported."""
 
     def __init__(self, state_directory: Path) -> None:
         """Create a store in a worktree-specific state directory."""
         self.state_directory = state_directory
 
-    def should_prompt(
-        self,
-        *,
-        session_id: str,
-        root: Path,
-        config_path: Path,
-        reviews: tuple[Review, ...],
-    ) -> bool:
-        """Return true once for each distinct relevant content state."""
-        path = _session_path(self.state_directory, session_id)
-        key = _state_key(root=root, config_path=config_path, reviews=reviews)
-        previous = _read_state(path)
-        if (
-            previous
-            and previous.get("version") == STATE_VERSION
-            and previous.get("state_key") == key
-        ):
-            return False
-        content = json.dumps(
-            {"version": STATE_VERSION, "state_key": key}, indent=2, sort_keys=True
+    def _path(self, session_id: str) -> Path:
+        return _session_path(self.state_directory, session_id, category="sessions")
+
+    def unreported(
+        self, *, session_id: str, candidates: Mapping[str, str]
+    ) -> tuple[str, ...]:
+        """Return candidates not yet reported at their fingerprint, then save all.
+
+        A document that stops being a candidate is forgotten, so it is reported
+        again if the same fingerprint returns later.
+        """
+        path = self._path(session_id)
+        reported = _read_fingerprints(path, STATE_VERSION) or {}
+        if reported != candidates:
+            _write_fingerprints(path, STATE_VERSION, candidates)
+        return tuple(
+            document
+            for document, fingerprint in sorted(candidates.items())
+            if reported.get(document) != fingerprint
         )
-        atomic_write(path, content + "\n")
-        return True
 
     def clear(self, session_id: str) -> None:
-        """Clear acknowledgement state for one session."""
-        _session_path(self.state_directory, session_id).unlink(missing_ok=True)
+        """Clear reminder state for one session."""
+        self._path(session_id).unlink(missing_ok=True)
