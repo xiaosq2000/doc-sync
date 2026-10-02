@@ -1,17 +1,17 @@
 # Changelog
 
-All notable changes to doc-sync will be recorded here. The project will follow
+All notable changes to docstale will be recorded here. The project will follow
 Semantic Versioning after its first stable release.
 
 ## Unreleased
 
 ### Added
 
-- `doc-sync.lock` records a fingerprint of each document's sources at its last
-  review, and `doc-sync stamp` writes it. Run `doc-sync stamp --all` once to
+- `docstale.lock` records a fingerprint of each document's sources at its last
+  review, and `docstale stamp` writes it. Run `docstale stamp --all` once to
   start a repository on the lock.
-- A `doc-sync-check` pre-commit hook runs `doc-sync check`.
-- The hook reminder suggests an optional `doc-sync-reviewer` subagent, and the
+- A `docstale` pre-commit hook runs `docstale check`.
+- The hook reminder suggests an optional `docstale-reviewer` subagent, and the
   README provides its Claude Code definition. The subagent only reports a
   verdict. It does not edit or stamp documents.
 - A `[sets]` table names source lists that documents include with `@name`.
@@ -24,6 +24,10 @@ Semantic Versioning after its first stable release.
 
 ### Changed
 
+- Renamed the project from doc-sync to docstale, because "sync" suggested a
+  document service. The command is `docstale`, and its files are
+  `docstale.toml` and `docstale.lock`. Rename an existing `doc-sync.toml`, and
+  update hook commands and pre-commit hook ids.
 - `check` compares documents with the lock instead of a diff. A document needs
   review until it is stamped again, and editing it no longer counts as a
   review. Each JSON document adds `since` and `stamped`.

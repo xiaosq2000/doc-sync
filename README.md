@@ -1,24 +1,24 @@
-# Doc-Sync
+# Docstale
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-Doc-sync finds documents that may need review after source files change. It
+Docstale finds documents that may need review after source files change. It
 uses a repository configuration, a committed record of reviews, and Git. It
 does not call an LLM or guess what the source change means.
 
 ## Install
 
-Doc-sync requires Python 3.11 or newer and Git.
+Docstale requires Python 3.11 or newer and Git.
 
 ```bash
-uv tool install git+https://github.com/xiaosq2000/doc-sync.git
+uv tool install git+https://github.com/xiaosq2000/docstale.git
 ```
 
 You can also use `pipx`:
 
 ```bash
-pipx install git+https://github.com/xiaosq2000/doc-sync.git
+pipx install git+https://github.com/xiaosq2000/docstale.git
 ```
 
 See the [installation guide](docs/installation.md) for source installs,
@@ -26,7 +26,7 @@ upgrades, and removal.
 
 ## Configure documents
 
-Create `doc-sync.toml` at the repository root. Each key in `[documents]` names
+Create `docstale.toml` at the repository root. Each key in `[documents]` names
 a document, and its value lists the source patterns that may affect it.
 
 ```toml
@@ -41,7 +41,7 @@ a document, and its value lists the source patterns that may affect it.
 ]
 ```
 
-`doc-sync check` reports a document when the files its sources match have
+`docstale check` reports a document when the files its sources match have
 changed since its last review was stamped. The [Stop hook](#add-a-stop-hook)
 reports the documents whose sources changed during an agent session.
 
@@ -102,13 +102,13 @@ already covers.
 
 ## Check and stamp documents
 
-`doc-sync.lock` records a fingerprint of each document's sources at its last
+`docstale.lock` records a fingerprint of each document's sources at its last
 review. Commit it together with the documents and sources it describes.
 
 ```bash
-doc-sync check
-doc-sync stamp README.md
-doc-sync stamp --all
+docstale check
+docstale stamp README.md
+docstale stamp --all
 ```
 
 `check` compares each document's current fingerprint with the lock. A document
@@ -118,7 +118,7 @@ needs review, `2` when review is required, and `1` for configuration or Git
 errors.
 
 After you review a document, and update it if needed, record the review with
-`doc-sync stamp` and the document's repository-relative path. Editing a document
+`docstale stamp` and the document's repository-relative path. Editing a document
 does not record a review. `stamp --all` stamps every document, which is how a
 repository starts using the lock. Every stamp also drops entries for documents
 that are no longer configured.
@@ -161,7 +161,7 @@ branch.
 
 ## Add a Stop hook
 
-Claude Code and Codex use the same `doc-sync hook` command. Add the following
+Claude Code and Codex use the same `docstale hook` command. Add the following
 SessionStart and Stop entries to `.claude/settings.json` or `.codex/hooks.json`,
 while preserving any settings and hooks already in the file:
 
@@ -173,7 +173,7 @@ while preserving any settings and hooks already in the file:
         "hooks": [
           {
             "type": "command",
-            "command": "doc-sync hook",
+            "command": "docstale hook",
             "timeout": 30
           }
         ]
@@ -184,7 +184,7 @@ while preserving any settings and hooks already in the file:
         "hooks": [
           {
             "type": "command",
-            "command": "doc-sync hook",
+            "command": "docstale hook",
             "timeout": 30,
             "statusMessage": "Checking documentation impact..."
           }
@@ -198,7 +198,7 @@ while preserving any settings and hooks already in the file:
 Codex requires project hooks to be trusted. Open Codex in the repository and
 use `/hooks` to review the entry.
 
-The hook stays silent when no `doc-sync.toml` exists or no review is needed. A
+The hook stays silent when no `docstale.toml` exists or no review is needed. A
 broken configuration returns a continuation message at Stop so the agent can
 report or fix it. SessionStart failures are reported on stderr without blocking
 the session.
@@ -206,7 +206,7 @@ the session.
 SessionStart saves a baseline with the fingerprint of every document. At Stop,
 the hook asks for a review of each document whose fingerprint differs from both
 the lock and the baseline. A document that already needed review when the
-session started is left to `doc-sync check`, so a session that only reads files
+session started is left to `docstale check`, so a session that only reads files
 or answers questions gets no reminder. The reminder lists every source that
 changed since the document was stamped, and stamping the document clears it.
 The baseline is preserved when the same session resumes or compacts.
@@ -223,35 +223,35 @@ add the SessionStart entry and start a new session to detect edits in the first
 response. With only Stop configured, the first Stop establishes the baseline,
 and only later edits can trigger a reminder.
 
-The agent protocol marks a continuation with `stop_hook_active`. Doc-sync lets
+The agent protocol marks a continuation with `stop_hook_active`. Docstale lets
 that continuation stop without running another check. It also remembers the
 fingerprint at which it last reported each document in a session, so a document
 is reported again only after its sources change again.
 
 Baselines and acknowledgements live separately under
-`git rev-parse --git-path doc-sync`. They contain document fingerprints, not
+`git rev-parse --git-path docstale`. They contain document fingerprints, not
 file contents. Clearing an acknowledgement preserves the baseline. No state file
 enters the working tree, and linked worktrees have separate state.
 
 ## Review with a subagent
 
-The hook reminder suggests a `doc-sync-reviewer` subagent when the agent has
+The hook reminder suggests a `docstale-reviewer` subagent when the agent has
 one. The subagent reads the source diff and the document and reports whether
 the document needs an update. It does not edit files or stamp documents, so the
 main agent stays responsible for both. Without the subagent, the main agent
 reviews each document itself.
 
-For Claude Code, save the following as `.claude/agents/doc-sync-reviewer.md`:
+For Claude Code, save the following as `.claude/agents/docstale-reviewer.md`:
 
 ```markdown
 ---
-name: doc-sync-reviewer
-description: Decides whether source changes require an update to one document that doc-sync reported. Use once for each reported document.
+name: docstale-reviewer
+description: Decides whether source changes require an update to one document that docstale reported. Use once for each reported document.
 tools: Read, Grep, Glob, Bash
 model: haiku
 ---
 
-You review one document that doc-sync reported. You receive the document path,
+You review one document that docstale reported. You receive the document path,
 the commit in its heading, and its changed sources. A document that was never
 stamped has no commit to compare with, so answer `unsure` for it.
 
@@ -267,20 +267,20 @@ Answer with one verdict on the first line, followed by at most three lines:
 - `affected`, followed by each section that is now wrong and why.
 - `unsure`, followed by what you could not decide.
 
-Do not edit files and do not run `doc-sync stamp`.
+Do not edit files and do not run `docstale stamp`.
 ```
 
 The main agent stamps `unaffected` documents, updates and then stamps
 `affected` ones, and asks you about `unsure` ones. A small model keeps each
-review cheap, and every stamp stays visible in the `doc-sync.lock` diff.
+review cheap, and every stamp stays visible in the `docstale.lock` diff.
 
 ## Disable the Stop hook locally
 
 Disable or enable only the automatic Stop hook for the current checkout:
 
 ```bash
-doc-sync disable
-doc-sync enable
+docstale disable
+docstale enable
 ```
 
 Manual `check` and `stamp` commands still run while the hook is disabled. The
@@ -289,14 +289,14 @@ Git metadata.
 
 ## Pre-commit
 
-The repository publishes a `doc-sync-check` pre-commit hook. It runs
-`doc-sync check`, which blocks a commit while a document needs review or the
+The repository publishes a `docstale` pre-commit hook. It runs
+`docstale check`, which blocks a commit while a document needs review or the
 configuration is invalid. It does not receive changed filenames.
 
 Pre-commit sets unstaged changes aside while hooks run, so stage
-`doc-sync.lock` with the rest of the commit. It also hides the warnings of a
+`docstale.lock` with the rest of the commit. It also hides the warnings of a
 passing hook unless the hook sets `verbose: true`.
 
 ## License
 
-Doc-sync is released under the [MIT License](LICENSE).
+Docstale is released under the [MIT License](LICENSE).

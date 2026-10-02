@@ -1,6 +1,6 @@
 # Security policy
 
-Doc-sync runs Git commands and can update repository-local agent settings. It
+Docstale runs Git commands and can update repository-local agent settings. It
 does not execute configured source or documentation paths.
 
 Please report suspected command injection, unsafe path handling, unintended file

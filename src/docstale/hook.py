@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from doc_sync.errors import DocSyncError
+from docstale.errors import DocstaleError
 
 
-class HookInputError(DocSyncError, ValueError):
+class HookInputError(DocstaleError, ValueError):
     """Raised when an agent supplies malformed hook input."""
 
 

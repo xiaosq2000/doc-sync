@@ -7,14 +7,14 @@ import stat
 import subprocess
 from pathlib import Path
 
-from doc_sync.errors import DocSyncError
+from docstale.errors import DocstaleError
 
 # Paths per `git hash-object` call, which keeps the command line short.
 _HASH_BATCH = 200
 
 
-class GitError(DocSyncError, RuntimeError):
-    """Raised when doc-sync cannot query repository state."""
+class GitError(DocstaleError, RuntimeError):
+    """Raised when docstale cannot query repository state."""
 
 
 def _run_git(root: Path, arguments: list[str], *, stdin: bytes | None = None) -> bytes:

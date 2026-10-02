@@ -4,8 +4,8 @@ import io
 import json
 from typing import TYPE_CHECKING
 
-from doc_sync.cli import main
-from doc_sync.lock import entry_line
+from docstale.cli import main
+from docstale.lock import entry_line
 from tests.support import commit_all, git, write_config
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ def _package_repository(root: Path) -> Path:
     (root / "packages/a/src").mkdir(parents=True)
     (root / "packages/a/README.md").write_text("docs", encoding="utf-8")
     (root / "packages/a/src/app.py").write_text("v1", encoding="utf-8")
-    (root / "doc-sync.toml").write_text(PACKAGE_CONFIG, encoding="utf-8")
+    (root / "docstale.toml").write_text(PACKAGE_CONFIG, encoding="utf-8")
     commit_all(root)
     return root / "packages/a/src/app.py"
 
@@ -111,7 +111,7 @@ def test_a_stamp_lasts_until_the_sources_change(
     source = repository / "src/app.py"
     monkeypatch.chdir(repository)
     assert _run(capsys, "stamp", "README.md")[0] == 0
-    assert _run(capsys, "check") == (0, "doc-sync: no documents need review\n")
+    assert _run(capsys, "check") == (0, "docstale: no documents need review\n")
 
     (repository / "README.md").write_text("edited docs", encoding="utf-8")
     assert _run(capsys, "check")[0] == 0
@@ -151,7 +151,7 @@ def test_a_conflicting_lock_entry_needs_review(
 ) -> None:
     monkeypatch.chdir(repository)
     assert _run(capsys, "stamp", "--all")[0] == 0
-    lock = repository / "doc-sync.lock"
+    lock = repository / "docstale.lock"
     entry = lock.read_text(encoding="utf-8").splitlines()[-1]
     other = entry_line("README.md", "0" * 16)
     lock.write_text(
@@ -169,7 +169,7 @@ def test_stamp_drops_entries_for_documents_no_longer_configured(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    lock = repository / "doc-sync.lock"
+    lock = repository / "docstale.lock"
     lock.write_text('"docs/removed.md" = "0000000000000000"\n', encoding="utf-8")
     monkeypatch.chdir(repository)
 
@@ -192,8 +192,8 @@ def test_stamp_requires_configured_documents_or_all(
         ["stamp", "docs/missing.md"],
     ):
         assert main(arguments) == 1
-        assert "doc-sync error:" in capsys.readouterr().err
-    assert not (repository / "doc-sync.lock").exists()
+        assert "docstale error:" in capsys.readouterr().err
+    assert not (repository / "docstale.lock").exists()
 
 
 def test_check_always_confirms_a_pass(
@@ -255,7 +255,7 @@ def test_active_stop_hook_never_blocks_again(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (empty_repository / "doc-sync.toml").write_text(BROKEN_CONFIG, encoding="utf-8")
+    (empty_repository / "docstale.toml").write_text(BROKEN_CONFIG, encoding="utf-8")
     monkeypatch.setattr(
         "sys.stdin", io.StringIO(_hook_payload(empty_repository, active=True))
     )
@@ -299,7 +299,7 @@ def test_hook_reports_a_broken_configuration_as_blocking_json(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (empty_repository / "doc-sync.toml").write_text(BROKEN_CONFIG, encoding="utf-8")
+    (empty_repository / "docstale.toml").write_text(BROKEN_CONFIG, encoding="utf-8")
     monkeypatch.setattr("sys.stdin", io.StringIO(_hook_payload(empty_repository)))
 
     exit_code = main(["hook"])
@@ -356,11 +356,11 @@ def test_check_warns_about_unmatched_sources_without_failing(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out == "doc-sync: no documents need review\n"
+    assert captured.out == "docstale: no documents need review\n"
     (warning,) = captured.err.splitlines()
-    assert warning.startswith("doc-sync warning: ")
+    assert warning.startswith("docstale warning: ")
     assert warning.endswith(
-        "doc-sync.toml: document `README.md` source `gone/` matches no file"
+        "docstale.toml: document `README.md` source `gone/` matches no file"
     )
 
 
@@ -374,4 +374,4 @@ def test_manual_error_uses_stderr_and_exit_one(
     exit_code = main(["check"])
 
     assert exit_code == 1
-    assert "doc-sync error:" in capsys.readouterr().err
+    assert "docstale error:" in capsys.readouterr().err

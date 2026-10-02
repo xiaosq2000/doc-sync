@@ -7,8 +7,8 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
-from doc_sync.fsutil import atomic_write
-from doc_sync.git import git_metadata_path
+from docstale.fsutil import atomic_write
+from docstale.git import git_metadata_path
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -19,14 +19,14 @@ BASELINE_VERSION = 2
 _FINGERPRINT = re.compile(r"[0-9a-f]{16}")
 DISABLED_MARKER = "disabled"
 _DISABLED_NOTE = (
-    "doc-sync is disabled for this checkout.\n"
-    "Run `doc-sync enable` to enable its Stop hook.\n"
+    "docstale is disabled for this checkout.\n"
+    "Run `docstale enable` to enable its Stop hook.\n"
 )
 
 
 def default_state_directory(root: Path) -> Path:
     """Return the worktree-specific Git metadata directory for hook state."""
-    return git_metadata_path(root, "doc-sync")
+    return git_metadata_path(root, "docstale")
 
 
 def is_disabled(state_directory: Path) -> bool:

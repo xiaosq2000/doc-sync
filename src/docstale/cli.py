@@ -1,4 +1,4 @@
-"""Command line interface for doc-sync."""
+"""Command line interface for docstale."""
 
 from __future__ import annotations
 
@@ -7,27 +7,27 @@ import json
 import sys
 from typing import TYPE_CHECKING
 
-from doc_sync.config import (
+from docstale.config import (
     CONFIG_FILENAME,
     Document,
     MissingConfigError,
     load_config,
     validate_repository,
 )
-from doc_sync.errors import DocSyncError
-from doc_sync.git import (
+from docstale.errors import DocstaleError
+from docstale.git import (
     changed_worktree_paths,
     head_commit,
     last_change_commit,
     object_ids,
     resolve_root,
 )
-from doc_sync.hook import HookContext, blocking_output, parse_context
-from doc_sync.lock import LOCK_FILENAME, entry_line, read_lock, write_lock
-from doc_sync.match import Review, fingerprint, matched_paths, stale_documents
-from doc_sync.paths import normalize_path
-from doc_sync.render import HOOK_GUIDANCE, build_review_message
-from doc_sync.state import (
+from docstale.hook import HookContext, blocking_output, parse_context
+from docstale.lock import LOCK_FILENAME, entry_line, read_lock, write_lock
+from docstale.match import Review, fingerprint, matched_paths, stale_documents
+from docstale.paths import normalize_path
+from docstale.render import HOOK_GUIDANCE, build_review_message
+from docstale.state import (
     AcknowledgementStore,
     BaselineStore,
     default_state_directory,
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 EXIT_ERROR = 1
 EXIT_REVIEW_REQUIRED = 2
-_NO_REVIEW_MESSAGE = "doc-sync: no documents need review"
+_NO_REVIEW_MESSAGE = "docstale: no documents need review"
 _DISPATCH_KEYS = frozenset({"command", "handler"})
 
 
@@ -92,7 +92,7 @@ def _run_check(*, json_output: bool) -> int:
     for warning in validate_repository(
         config, root=root, config_path=config_path, paths=ids
     ):
-        print(f"doc-sync warning: {warning}", file=sys.stderr)
+        print(f"docstale warning: {warning}", file=sys.stderr)
     lock = read_lock(root / LOCK_FILENAME)
     reviews = _describe(root, stale_documents(config.resolve(ids), ids, lock), lock)
     if json_output:
@@ -106,7 +106,7 @@ def _run_check(*, json_output: bool) -> int:
 
 def _run_stamp(*, documents: list[str], all_documents: bool) -> int:
     if bool(documents) == all_documents:
-        raise DocSyncError("name the documents to stamp, or pass --all alone")
+        raise DocstaleError("name the documents to stamp, or pass --all alone")
     root = resolve_root()
     config = load_config(root / CONFIG_FILENAME)
     ids = object_ids(root)
@@ -119,7 +119,7 @@ def _run_stamp(*, documents: list[str], all_documents: bool) -> int:
     unknown = [path for path in targets if path not in resolved]
     if unknown:
         rendered = ", ".join(f"`{path}`" for path in unknown)
-        raise DocSyncError(f"not a configured document: {rendered}")
+        raise DocstaleError(f"not a configured document: {rendered}")
 
     lock_path = root / LOCK_FILENAME
     # Entries for documents that are no longer configured are dropped.
@@ -159,7 +159,7 @@ def _hook_reviews(*, root: Path, context: HookContext) -> tuple[Review, ...] | N
         return None
 
     # Report documents that went stale during this session. Staleness from
-    # before the session is left to `doc-sync check`.
+    # before the session is left to `docstale check`.
     lock = read_lock(root / LOCK_FILENAME)
     candidates = {
         path: value
@@ -188,8 +188,8 @@ def _run_hook() -> int:
             _write_json(blocking_output(reason))
     except MissingConfigError:
         return 0
-    except (DocSyncError, OSError) as exc:
-        reason = f"doc-sync could not complete its check: {exc}"
+    except (DocstaleError, OSError) as exc:
+        reason = f"docstale could not complete its check: {exc}"
         if context is not None and context.hook_event_name == "SessionStart":
             print(reason, file=sys.stderr)
         else:
@@ -202,13 +202,13 @@ def _run_toggle(*, disabled: bool) -> int:
     state = "disabled" if disabled else "enabled"
     changed = set_disabled(default_state_directory(root), disabled=disabled)
     qualifier = "" if changed else "already "
-    print(f"doc-sync hook is {qualifier}{state} for {root}")
+    print(f"docstale hook is {qualifier}{state} for {root}")
     return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="doc-sync",
+        prog="docstale",
         description="Find documents that may need review after source changes.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -238,13 +238,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run doc-sync and return its exit code."""
+    """Run docstale and return its exit code."""
     args = _build_parser().parse_args(argv)
     options = {
         key: value for key, value in vars(args).items() if key not in _DISPATCH_KEYS
     }
     try:
         return int(args.handler(**options))
-    except (DocSyncError, OSError) as exc:
-        print(f"doc-sync error: {exc}", file=sys.stderr)
+    except (DocstaleError, OSError) as exc:
+        print(f"docstale error: {exc}", file=sys.stderr)
         return EXIT_ERROR

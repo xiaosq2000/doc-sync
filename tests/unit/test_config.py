@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from doc_sync.config import (
+from docstale.config import (
     Config,
     ConfigError,
     Document,
@@ -13,7 +13,7 @@ from doc_sync.config import (
     load_config,
     validate_repository,
 )
-from doc_sync.match import matched_paths
+from docstale.match import matched_paths
 from tests.support import write_config
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 def _load(root: Path, content: str) -> Config:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(content, encoding="utf-8")
     return load_config(path)
 
@@ -122,11 +122,11 @@ def test_directory_templates_keep_glob_characters_literal(root: Path) -> None:
 
 def test_an_absent_file_has_a_distinct_error(root: Path) -> None:
     with pytest.raises(MissingConfigError, match="does not exist"):
-        load_config(root / "doc-sync.toml")
+        load_config(root / "docstale.toml")
 
 
 def test_a_broken_file_is_not_reported_as_missing(root: Path) -> None:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text("[documents\n", encoding="utf-8")
 
     with pytest.raises(ConfigError, match="TOML parse error") as caught:
@@ -213,7 +213,7 @@ def test_a_broken_file_is_not_reported_as_missing(root: Path) -> None:
 def test_rejects_invalid_config(
     root: Path, content: str, expected_message: str
 ) -> None:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(content, encoding="utf-8")
 
     with pytest.raises(ConfigError, match=expected_message):
@@ -250,7 +250,7 @@ def test_repository_validation_reports_set_sources_and_unused_sets(
     root: Path,
 ) -> None:
     (root / "README.md").write_text("docs", encoding="utf-8")
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(
         '[sets]\nshared = ["src/", "gone.py"]\nidle = ["src/"]\n\n'
         '[documents]\n"README.md" = ["@shared"]\n',
@@ -266,7 +266,7 @@ def test_repository_validation_reports_set_sources_and_unused_sets(
 
 
 def test_a_template_is_unmatched_only_when_no_document_matches(root: Path) -> None:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(
         '[documents]\n"decks/*/index.md" = ["{dir}/main.tex", "{dir}/gone.bib"]\n',
         encoding="utf-8",

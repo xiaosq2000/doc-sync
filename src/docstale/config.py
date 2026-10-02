@@ -1,4 +1,4 @@
-"""Load, validate, and resolve doc-sync configuration."""
+"""Load, validate, and resolve docstale configuration."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from doc_sync.errors import DocSyncError
-from doc_sync.paths import SourcePattern, has_glob, normalize_path, relative_path_error
+from docstale.errors import DocstaleError
+from docstale.paths import SourcePattern, has_glob, normalize_path, relative_path_error
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
 
-CONFIG_FILENAME = "doc-sync.toml"
+CONFIG_FILENAME = "docstale.toml"
 DIRECTORY = "{dir}"
 _ROOT_KEYS = {"documents", "sets"}
 _SET_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -23,12 +23,12 @@ _SET_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
 _SPECIAL = re.compile(r"([\\*?\[\] ])")
 
 
-class ConfigError(DocSyncError, ValueError):
-    """Raised when the doc-sync configuration is invalid."""
+class ConfigError(DocstaleError, ValueError):
+    """Raised when the docstale configuration is invalid."""
 
 
 class MissingConfigError(ConfigError):
-    """Raised when no doc-sync configuration exists."""
+    """Raised when no docstale configuration exists."""
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ class Entry:
 
 @dataclass(frozen=True)
 class Config:
-    """Validated doc-sync configuration."""
+    """Validated docstale configuration."""
 
     entries: tuple[Entry, ...]
     sets: dict[str, tuple[str, ...]]
@@ -262,7 +262,7 @@ def _entry(
 
 
 def load_config(config_path: Path) -> Config:
-    """Load and validate a doc-sync TOML file."""
+    """Load and validate a docstale TOML file."""
     if not config_path.is_file():
         raise MissingConfigError(f"{config_path}: configuration file does not exist")
     try:

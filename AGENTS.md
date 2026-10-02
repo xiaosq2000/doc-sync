@@ -1,6 +1,6 @@
-# doc-sync
+# docstale
 
-Doc-sync reports documents whose sources changed since their last recorded
+Docstale reports documents whose sources changed since their last recorded
 review, using TOML, a committed lockfile, and Git.
 Keep it deterministic, with no LLM calls or heuristics and `pathspec` as its only
 runtime dependency. Do not add command variants, agent installers, or a public
@@ -32,7 +32,7 @@ error handling, and setup.
   configuration, or state.
 - Keep session baselines separate from acknowledgements. Resume, compaction,
   and clearing acknowledgements must preserve the baseline.
-- Store hook state under `git rev-parse --git-path doc-sync` so linked worktrees
+- Store hook state under `git rev-parse --git-path docstale` so linked worktrees
   remain independent. The disable marker affects only hooks, never manual
   commands or their JSON status.
 

@@ -1,7 +1,7 @@
-- id: doc-sync-check
+- id: docstale
   name: check documentation reviews
   description: Fail while the configuration is invalid or a document needs review.
-  entry: doc-sync check
+  entry: docstale check
   language: python
   pass_filenames: false
   always_run: true

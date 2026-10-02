@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from doc_sync import state
-from doc_sync.cli import main
-from doc_sync.git import GitError
-from doc_sync.state import BaselineStore, default_state_directory
+from docstale import state
+from docstale.cli import main
+from docstale.git import GitError
+from docstale.state import BaselineStore, default_state_directory
 from tests.support import add_submodule, commit_all, git, write_config
 
 if TYPE_CHECKING:
@@ -72,8 +72,8 @@ def test_existing_edits_do_not_prompt(hook: HookRunner, staged: bool) -> None:
     assert response["decision"] == "block"
     # The reminder covers every change since the stamp, from any session.
     assert "  src/app.py\n  src/untracked.py\n" in response["reason"]
-    assert "doc-sync-reviewer" in response["reason"]
-    assert "doc-sync stamp <document>" in response["reason"]
+    assert "docstale-reviewer" in response["reason"]
+    assert "docstale stamp <document>" in response["reason"]
     assert hook() == ""
 
 
@@ -105,7 +105,7 @@ def test_stamping_records_the_review_and_editing_does_not(hook: HookRunner) -> N
 
 
 def test_unstamped_documents_are_named(hook: HookRunner) -> None:
-    (hook.root / "doc-sync.lock").unlink()
+    (hook.root / "docstale.lock").unlink()
     assert hook("SessionStart") == ""
     (hook.root / "src/app.py").write_text("v2", encoding="utf-8")
     assert "README.md (never stamped)" in json.loads(hook())["reason"]
@@ -268,7 +268,7 @@ def test_active_stop_never_reads_git_or_state(hook: HookRunner) -> None:
     def fail(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("active Stop must return before accessing Git or state")
 
-    hook.monkeypatch.setattr("doc_sync.cli.resolve_root", fail)
+    hook.monkeypatch.setattr("docstale.cli.resolve_root", fail)
     hook.monkeypatch.setattr(BaselineStore, "load", fail)
     hook.monkeypatch.setattr(
         "sys.stdin",
@@ -293,7 +293,7 @@ def test_resumed_session_start_does_not_read_files(hook: HookRunner) -> None:
     def fail(_root: Path) -> None:
         raise AssertionError("a resumed session keeps its baseline")
 
-    hook.monkeypatch.setattr("doc_sync.cli.object_ids", fail)
+    hook.monkeypatch.setattr("docstale.cli.object_ids", fail)
     assert hook("SessionStart") == ""
 
 
@@ -301,7 +301,7 @@ def test_session_start_failure_uses_stderr(hook: HookRunner) -> None:
     def fail(_root: str) -> None:
         raise GitError("unavailable repository")
 
-    hook.monkeypatch.setattr("doc_sync.cli.resolve_root", fail)
+    hook.monkeypatch.setattr("docstale.cli.resolve_root", fail)
     hook.monkeypatch.setattr(
         "sys.stdin",
         io.StringIO(
@@ -332,7 +332,7 @@ def test_disabled_hook_does_not_create_a_baseline(hook: HookRunner, event: str) 
 def test_missing_config_does_not_create_a_baseline(
     hook: HookRunner, event: str
 ) -> None:
-    (hook.root / "doc-sync.toml").unlink()
+    (hook.root / "docstale.toml").unlink()
     assert hook(event) == ""
     assert not (default_state_directory(hook.root) / "baselines").exists()
 
@@ -343,7 +343,7 @@ def test_stop_reports_a_git_failure(hook: HookRunner) -> None:
     def fail(_root: Path) -> None:
         raise GitError("object ids are unavailable")
 
-    hook.monkeypatch.setattr("doc_sync.cli.object_ids", fail)
+    hook.monkeypatch.setattr("docstale.cli.object_ids", fail)
     response = json.loads(hook())
     assert response["decision"] == "block"
     assert "object ids are unavailable" in response["reason"]
