@@ -7,14 +7,14 @@ import stat
 import subprocess
 from pathlib import Path
 
-from doc_sync.errors import DocSyncError
+from docstale.errors import DocstaleError
 
 # Paths per `git hash-object` call, which keeps the command line short.
 _HASH_BATCH = 200
 
 
-class GitError(DocSyncError, RuntimeError):
-    """Raised when doc-sync cannot query repository state."""
+class GitError(DocstaleError, RuntimeError):
+    """Raised when docstale cannot query repository state."""
 
 
 def _run_git(root: Path, arguments: list[str], *, stdin: bytes | None = None) -> bytes:
@@ -83,28 +83,6 @@ def changed_worktree_paths(root: Path, commit: str | None = None) -> tuple[str, 
         ),
     }
     return tuple(sorted(changed))
-
-
-def worktree_paths(root: Path) -> tuple[str, ...]:
-    """List tracked and non-ignored untracked paths, including deleted entries."""
-    return tuple(
-        sorted(
-            set(
-                _nul_paths(
-                    _run_git(
-                        root,
-                        [
-                            "ls-files",
-                            "--cached",
-                            "--others",
-                            "--exclude-standard",
-                            "-z",
-                        ],
-                    )
-                )
-            )
-        )
-    )
 
 
 def object_ids(root: Path) -> dict[str, str]:

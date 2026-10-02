@@ -1,4 +1,4 @@
-"""Shared fixtures for the doc-sync test suite."""
+"""Shared fixtures for the docstale test suite."""
 
 from __future__ import annotations
 

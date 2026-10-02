@@ -1,1 +1,1 @@
-"""Tests for the portable doc-sync checker."""
+"""Tests for the portable docstale checker."""

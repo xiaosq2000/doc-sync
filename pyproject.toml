@@ -19,13 +19,13 @@ dependencies = ["pathspec>=0.12"]
 description = "Find documents that may need review after source changes"
 license = "MIT"
 license-files = ["LICENSE"]
-name = "doc-sync"
+name = "docstale"
 readme = "README.md"
 requires-python = ">=3.11"
 version = "0.1.0a2"
 
 [project.scripts]
-doc-sync = "doc_sync.cli:main"
+docstale = "docstale.cli:main"
 
 # Upper bounds are deliberate: `ruff` selects ALL rules and `ty` treats every
 # rule as an error, so a minor release of either turns unrelated CI runs red.
@@ -40,7 +40,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/doc_sync"]
+packages = ["src/docstale"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
@@ -56,7 +56,7 @@ show_missing = true
 
 [tool.coverage.run]
 branch = true
-source = ["src/doc_sync"]
+source = ["src/docstale"]
 
 [tool.ruff]
 line-length = 88

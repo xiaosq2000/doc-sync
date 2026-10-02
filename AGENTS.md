@@ -1,6 +1,6 @@
-# doc-sync
+# docstale
 
-Doc-sync reports documents whose sources changed since their last recorded
+Docstale reports documents whose sources changed since their last recorded
 review, using TOML, a committed lockfile, and Git.
 Keep it deterministic, with no LLM calls or heuristics and `pathspec` as its only
 runtime dependency. Do not add command variants, agent installers, or a public
@@ -12,6 +12,10 @@ Setup and check commands are in [CONTRIBUTING.md](CONTRIBUTING.md#development-se
 Local tests use temporary fixtures and Git repositories. You may run checks and
 fix failures caused by the requested change without asking for approval at each
 step. Keep tool upgrades deliberate and fix new findings in the same change.
+
+This repository runs docstale on itself. Before finishing a change, review each
+document that `uv run docstale check` lists, update it if needed, and stamp it.
+Stamp a document only after reading it against the changed sources.
 
 ## Code boundaries
 
@@ -25,14 +29,14 @@ step. Keep tool upgrades deliberate and fix new findings in the same change.
 
 ## Hook invariants
 
-The [README hook section](README.md#add-a-stop-hook) defines session behavior,
+The [README hook section](README.md#add-the-agent-hook) defines session behavior,
 error handling, and setup.
 
 - Return immediately when `stop_hook_active` is true, before accessing Git,
   configuration, or state.
 - Keep session baselines separate from acknowledgements. Resume, compaction,
   and clearing acknowledgements must preserve the baseline.
-- Store hook state under `git rev-parse --git-path doc-sync` so linked worktrees
+- Store hook state under `git rev-parse --git-path docstale` so linked worktrees
   remain independent. The disable marker affects only hooks, never manual
   commands or their JSON status.
 

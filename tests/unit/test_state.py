@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from doc_sync.state import (
+from docstale.state import (
     AcknowledgementStore,
     BaselineStore,
     is_disabled,

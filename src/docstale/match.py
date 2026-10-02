@@ -6,12 +6,12 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from doc_sync.paths import SourcePattern
+from docstale.paths import SourcePattern
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from doc_sync.config import Document
+    from docstale.config import Document
 
 FINGERPRINT_LENGTH = 16
 

@@ -5,15 +5,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from doc_sync.config import (
+from docstale.config import (
     Config,
     ConfigError,
     Document,
     MissingConfigError,
     load_config,
-    validate_repository_config,
+    validate_repository,
 )
-from doc_sync.match import matched_paths
+from docstale.match import matched_paths
 from tests.support import write_config
 
 if TYPE_CHECKING:
@@ -21,9 +21,15 @@ if TYPE_CHECKING:
 
 
 def _load(root: Path, content: str) -> Config:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(content, encoding="utf-8")
     return load_config(path)
+
+
+def _validate(root: Path, path: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
+    return validate_repository(
+        load_config(path), root=root, config_path=path, paths=paths
+    )
 
 
 def test_resolves_documents_in_stable_path_order(root: Path) -> None:
@@ -116,11 +122,11 @@ def test_directory_templates_keep_glob_characters_literal(root: Path) -> None:
 
 def test_an_absent_file_has_a_distinct_error(root: Path) -> None:
     with pytest.raises(MissingConfigError, match="does not exist"):
-        load_config(root / "doc-sync.toml")
+        load_config(root / "docstale.toml")
 
 
 def test_a_broken_file_is_not_reported_as_missing(root: Path) -> None:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text("[documents\n", encoding="utf-8")
 
     with pytest.raises(ConfigError, match="TOML parse error") as caught:
@@ -207,7 +213,7 @@ def test_a_broken_file_is_not_reported_as_missing(root: Path) -> None:
 def test_rejects_invalid_config(
     root: Path, content: str, expected_message: str
 ) -> None:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(content, encoding="utf-8")
 
     with pytest.raises(ConfigError, match=expected_message):
@@ -218,16 +224,14 @@ def test_repository_validation_requires_exact_documents(repository: Path) -> Non
     path = write_config(repository, document="docs/missing.md")
 
     with pytest.raises(ConfigError, match=r"docs/missing\.md.*does not exist"):
-        validate_repository_config(root=repository, config_path=path, paths=())
+        _validate(repository, path, ())
 
 
 def test_repository_validation_requires_glob_keys_to_match(repository: Path) -> None:
     path = write_config(repository, document="docs/*.md")
 
     with pytest.raises(ConfigError, match=r"docs/\*\.md.*matches no document"):
-        validate_repository_config(
-            root=repository, config_path=path, paths=("README.md", "src/app.py")
-        )
+        _validate(repository, path, ("README.md", "src/app.py"))
 
 
 def test_repository_validation_warns_about_unmatched_sources(
@@ -235,9 +239,7 @@ def test_repository_validation_warns_about_unmatched_sources(
 ) -> None:
     path = write_config(repository, sources=("src/", "future/**/*.py"))
 
-    warnings = validate_repository_config(
-        root=repository, config_path=path, paths=("README.md", "src/app.py")
-    )
+    warnings = _validate(repository, path, ("README.md", "src/app.py"))
 
     assert warnings == (
         f"{path}: document `README.md` source `future/**/*.py` matches no file",
@@ -248,16 +250,14 @@ def test_repository_validation_reports_set_sources_and_unused_sets(
     root: Path,
 ) -> None:
     (root / "README.md").write_text("docs", encoding="utf-8")
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(
         '[sets]\nshared = ["src/", "gone.py"]\nidle = ["src/"]\n\n'
         '[documents]\n"README.md" = ["@shared"]\n',
         encoding="utf-8",
     )
 
-    warnings = validate_repository_config(
-        root=root, config_path=path, paths=("README.md", "src/app.py")
-    )
+    warnings = _validate(root, path, ("README.md", "src/app.py"))
 
     assert warnings == (
         f"{path}: set `shared` source `gone.py` matches no file",
@@ -266,16 +266,14 @@ def test_repository_validation_reports_set_sources_and_unused_sets(
 
 
 def test_a_template_is_unmatched_only_when_no_document_matches(root: Path) -> None:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(
         '[documents]\n"decks/*/index.md" = ["{dir}/main.tex", "{dir}/gone.bib"]\n',
         encoding="utf-8",
     )
 
-    warnings = validate_repository_config(
-        root=root,
-        config_path=path,
-        paths=("decks/a/index.md", "decks/a/main.tex", "decks/b/index.md"),
+    warnings = _validate(
+        root, path, ("decks/a/index.md", "decks/a/main.tex", "decks/b/index.md")
     )
 
     assert warnings == (

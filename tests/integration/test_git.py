@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from doc_sync.git import (
+from docstale.git import (
     GitError,
     changed_worktree_paths,
     head_commit,

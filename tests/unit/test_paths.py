@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from doc_sync.paths import match_path, normalize_path, relative_path_error
+from docstale.paths import match_path, normalize_path, relative_path_error
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from doc_sync.config import Document
-from doc_sync.match import (
+from docstale.config import Document
+from docstale.match import (
     Review,
     fingerprint,
     matched_paths,
     stale_documents,
 )
-from doc_sync.render import build_review_message
+from docstale.render import build_review_message
 
 README = Document("README.md", ("README.md", "src/"))
 IDS = {"README.md": "a1", "src/app.py": "b1", "tests/test_app.py": "c1"}
@@ -50,4 +50,4 @@ def test_message_says_since_when_and_whether_a_document_was_stamped() -> None:
 
     assert "README.md (changed since 0123456789ab)\n  src/app.py" in message
     assert "docs/api.md (never stamped)" in message
-    assert "doc-sync stamp <document>" in message
+    assert "docstale stamp <document>" in message

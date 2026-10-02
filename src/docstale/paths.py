@@ -64,7 +64,7 @@ class SourcePattern:
         # through an explicit `**/` prefix, so `app.py` names the root file
         # while `**/app.py` names that file anywhere. Anchoring also makes a
         # leading `!` or `#` an ordinary character rather than gitignore
-        # negation or a comment, neither of which doc-sync supports.
+        # negation or a comment, neither of which docstale supports.
         compiled = GitIgnoreBasicPattern(f"/{pattern}")
         if compiled.include:
             self._pattern = compiled

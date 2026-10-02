@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from doc_sync.hook import HookInputError, parse_context
+from docstale.hook import HookInputError, parse_context
 
 
 @pytest.mark.parametrize("event", ["SessionStart", "Stop", None])

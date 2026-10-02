@@ -6,7 +6,7 @@ import json
 import subprocess
 from typing import TYPE_CHECKING
 
-from doc_sync.config import Document
+from docstale.config import Document
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -25,8 +25,8 @@ def git(root: Path, *arguments: str) -> str:
 
 def initialize_repository(root: Path) -> None:
     git(root, "init", "-q")
-    git(root, "config", "user.email", "doc-sync@example.invalid")
-    git(root, "config", "user.name", "Doc Sync Tests")
+    git(root, "config", "user.email", "docstale@example.invalid")
+    git(root, "config", "user.name", "Docstale Tests")
 
 
 def commit_all(root: Path, message: str = "initial") -> None:
@@ -65,7 +65,7 @@ def render_config(documents: Iterable[Document]) -> str:
 def write_config(
     root: Path, *, document: str = "README.md", sources: tuple[str, ...] = ("src/",)
 ) -> Path:
-    path = root / "doc-sync.toml"
+    path = root / "docstale.toml"
     path.write_text(
         render_config((Document(path=document, sources=sources),)), encoding="utf-8"
     )
