@@ -41,8 +41,7 @@ fingerprints in `doc-sync.lock`.
 - `hook.py` parses the shared Claude Code and Codex Stop protocol.
 - `state.py` stores session fingerprints, reminder state, and the local disable
   marker.
-- `cli.py` implements `check`, `stamp`, `validate`, `hook`, `disable`, and
-  `enable`.
+- `cli.py` implements `check`, `stamp`, `hook`, `disable`, and `enable`.
 
 Keep `match.py` and `Config.resolve()` free of Git, file access, hook input,
 and command output.

@@ -328,32 +328,35 @@ def test_disabling_affects_the_hook_but_not_manual_checks(
     assert "README.md" in capsys.readouterr().out
 
 
-def test_validate_checks_document_targets(
+def test_check_fails_when_a_document_does_not_exist(
     repository: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    write_config(repository, document="docs/missing.md")
     monkeypatch.chdir(repository)
 
-    exit_code = main(["validate"])
+    exit_code = main(["check"])
 
-    assert exit_code == 0
-    assert capsys.readouterr().out.startswith("valid ")
+    assert exit_code == 1
+    assert "`docs/missing.md` does not exist" in capsys.readouterr().err
 
 
-def test_validate_warns_about_unmatched_sources_without_failing(
+def test_check_warns_about_unmatched_sources_without_failing(
     repository: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     write_config(repository, sources=("src/", "gone/"))
     monkeypatch.chdir(repository)
+    assert main(["stamp", "--all"]) == 0
+    capsys.readouterr()
 
-    exit_code = main(["validate"])
+    exit_code = main(["check"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out.startswith("valid ")
+    assert captured.out == "doc-sync: no documents need review\n"
     (warning,) = captured.err.splitlines()
     assert warning.startswith("doc-sync warning: ")
     assert warning.endswith(

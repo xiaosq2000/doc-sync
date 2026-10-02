@@ -1,13 +1,6 @@
-- id: doc-sync-validate
-  name: validate doc-sync configuration
-  description: Validate doc-sync.toml and its document targets.
-  entry: doc-sync validate
-  language: python
-  pass_filenames: false
-  always_run: true
 - id: doc-sync-check
   name: check documentation reviews
-  description: Fail while a document's sources changed since its last stamp.
+  description: Fail while the configuration is invalid or a document needs review.
   entry: doc-sync check
   language: python
   pass_filenames: false

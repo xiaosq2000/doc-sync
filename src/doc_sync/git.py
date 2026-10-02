@@ -85,28 +85,6 @@ def changed_worktree_paths(root: Path, commit: str | None = None) -> tuple[str, 
     return tuple(sorted(changed))
 
 
-def worktree_paths(root: Path) -> tuple[str, ...]:
-    """List tracked and non-ignored untracked paths, including deleted entries."""
-    return tuple(
-        sorted(
-            set(
-                _nul_paths(
-                    _run_git(
-                        root,
-                        [
-                            "ls-files",
-                            "--cached",
-                            "--others",
-                            "--exclude-standard",
-                            "-z",
-                        ],
-                    )
-                )
-            )
-        )
-    )
-
-
 def object_ids(root: Path) -> dict[str, str]:
     """Return the Git object id of every tracked or non-ignored untracked path.
 

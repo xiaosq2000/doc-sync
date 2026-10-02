@@ -11,7 +11,7 @@ from doc_sync.config import (
     Document,
     MissingConfigError,
     load_config,
-    validate_repository_config,
+    validate_repository,
 )
 from doc_sync.match import matched_paths
 from tests.support import write_config
@@ -24,6 +24,12 @@ def _load(root: Path, content: str) -> Config:
     path = root / "doc-sync.toml"
     path.write_text(content, encoding="utf-8")
     return load_config(path)
+
+
+def _validate(root: Path, path: Path, paths: tuple[str, ...]) -> tuple[str, ...]:
+    return validate_repository(
+        load_config(path), root=root, config_path=path, paths=paths
+    )
 
 
 def test_resolves_documents_in_stable_path_order(root: Path) -> None:
@@ -218,16 +224,14 @@ def test_repository_validation_requires_exact_documents(repository: Path) -> Non
     path = write_config(repository, document="docs/missing.md")
 
     with pytest.raises(ConfigError, match=r"docs/missing\.md.*does not exist"):
-        validate_repository_config(root=repository, config_path=path, paths=())
+        _validate(repository, path, ())
 
 
 def test_repository_validation_requires_glob_keys_to_match(repository: Path) -> None:
     path = write_config(repository, document="docs/*.md")
 
     with pytest.raises(ConfigError, match=r"docs/\*\.md.*matches no document"):
-        validate_repository_config(
-            root=repository, config_path=path, paths=("README.md", "src/app.py")
-        )
+        _validate(repository, path, ("README.md", "src/app.py"))
 
 
 def test_repository_validation_warns_about_unmatched_sources(
@@ -235,9 +239,7 @@ def test_repository_validation_warns_about_unmatched_sources(
 ) -> None:
     path = write_config(repository, sources=("src/", "future/**/*.py"))
 
-    warnings = validate_repository_config(
-        root=repository, config_path=path, paths=("README.md", "src/app.py")
-    )
+    warnings = _validate(repository, path, ("README.md", "src/app.py"))
 
     assert warnings == (
         f"{path}: document `README.md` source `future/**/*.py` matches no file",
@@ -255,9 +257,7 @@ def test_repository_validation_reports_set_sources_and_unused_sets(
         encoding="utf-8",
     )
 
-    warnings = validate_repository_config(
-        root=root, config_path=path, paths=("README.md", "src/app.py")
-    )
+    warnings = _validate(root, path, ("README.md", "src/app.py"))
 
     assert warnings == (
         f"{path}: set `shared` source `gone.py` matches no file",
@@ -272,10 +272,8 @@ def test_a_template_is_unmatched_only_when_no_document_matches(root: Path) -> No
         encoding="utf-8",
     )
 
-    warnings = validate_repository_config(
-        root=root,
-        config_path=path,
-        paths=("decks/a/index.md", "decks/a/main.tex", "decks/b/index.md"),
+    warnings = _validate(
+        root, path, ("decks/a/index.md", "decks/a/main.tex", "decks/b/index.md")
     )
 
     assert warnings == (

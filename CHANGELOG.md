@@ -19,8 +19,8 @@ Semantic Versioning after its first stable release.
   created later, and a document named by several keys watches the sources of
   all of them.
 - A source that starts with `{dir}` is relative to the document's directory.
-- `validate` warns about sources that match no file and sets that no document
-  uses. It still exits `0`.
+- `check` warns about sources that match no file and sets that no document
+  uses, without changing its exit code.
 
 ### Changed
 
@@ -34,7 +34,8 @@ Semantic Versioning after its first stable release.
 - A directory pattern without glob characters also matches a submodule or
   symlink at that path. A submodule counts when its commit changes and not when
   files inside it are edited.
-- `validate` fails when a glob key matches no document.
+- `check` validates the configuration. It fails when an exact document does not
+  exist or a glob key matches no document.
 - A source that starts with `@` names a set. Write `./@name` for a root path
   that starts with `@`.
 
@@ -44,6 +45,8 @@ Semantic Versioning after its first stable release.
   repository state, so there is no diff to select.
 - The JSON schema for the configuration. No test kept it in step with the
   loader.
+- `validate` and the `doc-sync-validate` pre-commit hook. `check` now does the
+  same validation.
 
 ## 0.1.0a2
 

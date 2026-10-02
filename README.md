@@ -153,16 +153,11 @@ committed yet, it is the commit at `HEAD`. `sources` lists the matched files tha
 changed since that commit. A document that was never stamped has `stamped` set
 to `false`, `since` set to `null`, and no sources.
 
-Validate the configuration:
-
-```bash
-doc-sync validate
-```
-
-Validation fails when an exact document does not exist or a glob key matches no
-document. Sources that match no file and sets that no document uses produce
-warnings on stderr, and the command still exits `0`. A shared configuration can
-therefore refer to files that exist only on another branch.
+`check` also validates the configuration. It fails when an exact document does
+not exist or a glob key matches no document. Sources that match no file and sets
+that no document uses produce warnings on stderr without changing the exit
+code, so a shared configuration can refer to files that exist only on another
+branch.
 
 ## Add a Stop hook
 
@@ -288,20 +283,15 @@ doc-sync disable
 doc-sync enable
 ```
 
-Manual `check`, `stamp`, and `validate` commands still run while the hook is
-disabled.
-The switch is local to one checkout and is stored beside acknowledgement state
-under Git metadata.
+Manual `check` and `stamp` commands still run while the hook is disabled. The
+switch is local to one checkout and is stored beside acknowledgement state under
+Git metadata.
 
 ## Pre-commit
 
-The repository publishes two pre-commit hooks. Neither receives changed
-filenames.
-
-| Hook | Command | Use |
-| --- | --- | --- |
-| `doc-sync-validate` | `doc-sync validate` | Catch configuration errors |
-| `doc-sync-check` | `doc-sync check` | Block commits while documents need review |
+The repository publishes a `doc-sync-check` pre-commit hook. It runs
+`doc-sync check`, which blocks a commit while a document needs review or the
+configuration is invalid. It does not receive changed filenames.
 
 Pre-commit sets unstaged changes aside while hooks run, so stage
 `doc-sync.lock` with the rest of the commit. It also hides the warnings of a

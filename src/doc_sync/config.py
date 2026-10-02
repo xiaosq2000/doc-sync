@@ -289,8 +289,8 @@ def load_config(config_path: Path) -> Config:
     return Config(entries=tuple(entries), sets=sets)
 
 
-def validate_repository_config(
-    *, root: Path, config_path: Path, paths: Iterable[str]
+def validate_repository(
+    config: Config, *, root: Path, config_path: Path, paths: Iterable[str]
 ) -> tuple[str, ...]:
     """Validate configuration against the repository and return warnings.
 
@@ -298,7 +298,6 @@ def validate_repository_config(
     Unmatched sources and unused sets are only warnings, because a shared
     configuration may name files that exist on another branch.
     """
-    config = load_config(config_path)
     candidates = _candidates(paths)
     problems: list[str] = []
     for entry in config.entries:

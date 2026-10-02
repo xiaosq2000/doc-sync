@@ -12,7 +12,7 @@ from doc_sync.config import (
     Document,
     MissingConfigError,
     load_config,
-    validate_repository_config,
+    validate_repository,
 )
 from doc_sync.errors import DocSyncError
 from doc_sync.git import (
@@ -21,7 +21,6 @@ from doc_sync.git import (
     last_change_commit,
     object_ids,
     resolve_root,
-    worktree_paths,
 )
 from doc_sync.hook import HookContext, blocking_output, parse_context
 from doc_sync.lock import LOCK_FILENAME, entry_line, read_lock, write_lock
@@ -87,8 +86,13 @@ def _write_json(value: object) -> None:
 
 def _run_check(*, json_output: bool) -> int:
     root = resolve_root()
-    config = load_config(root / CONFIG_FILENAME)
+    config_path = root / CONFIG_FILENAME
+    config = load_config(config_path)
     ids = object_ids(root)
+    for warning in validate_repository(
+        config, root=root, config_path=config_path, paths=ids
+    ):
+        print(f"doc-sync warning: {warning}", file=sys.stderr)
     lock = read_lock(root / LOCK_FILENAME)
     reviews = _describe(root, stale_documents(config.resolve(ids), ids, lock), lock)
     if json_output:
@@ -129,17 +133,6 @@ def _run_stamp(*, documents: list[str], all_documents: bool) -> int:
     write_lock(lock_path, lock)
     for path in targets:
         print(f"stamped {path}")
-    return 0
-
-
-def _run_validate() -> int:
-    root = resolve_root()
-    path = root / CONFIG_FILENAME
-    for warning in validate_repository_config(
-        root=root, config_path=path, paths=worktree_paths(root)
-    ):
-        print(f"doc-sync warning: {warning}", file=sys.stderr)
-    print(f"valid {path}")
     return 0
 
 
@@ -232,9 +225,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--all", dest="all_documents", action="store_true", help="Stamp every document."
     )
     stamp.set_defaults(handler=_run_stamp)
-
-    validate = subparsers.add_parser("validate", help="Validate doc-sync.toml.")
-    validate.set_defaults(handler=_run_validate)
 
     hook = subparsers.add_parser("hook", help="Run the shared session hook adapter.")
     hook.set_defaults(handler=_run_hook)
