@@ -1,7 +1,8 @@
 # Security policy
 
-Docstale runs Git commands and can update repository-local agent settings. It
-does not execute configured source or documentation paths.
+Docstale runs Git commands, writes `docstale.lock` when you stamp a document,
+and keeps hook state under Git metadata. It does not edit agent settings or
+execute configured source or documentation paths.
 
 Please report suspected command injection, unsafe path handling, unintended file
 replacement, or package supply-chain issues privately through GitHub's security
