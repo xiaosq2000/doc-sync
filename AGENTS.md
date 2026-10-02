@@ -1,6 +1,7 @@
 # doc-sync
 
-Doc-sync maps changed source paths to unchanged documents using TOML and Git.
+Doc-sync reports documents whose sources changed since their last recorded
+review, using TOML, a committed lockfile, and Git.
 Keep it deterministic, with no LLM calls or heuristics and `pathspec` as its only
 runtime dependency. Do not add command variants, agent installers, or a public
 Python API without a demonstrated use case.
@@ -14,8 +15,9 @@ step. Keep tool upgrades deliberate and fix new findings in the same change.
 
 ## Code boundaries
 
-- Keep `evaluate()` and `Config.resolve()` free of Git, file access, hook input,
-  and command output. `cli.py` passes in the repository paths.
+- Keep `evaluate()`, `fingerprint()`, and `Config.resolve()` free of Git, file
+  access, hook input, and command output. `cli.py` passes in repository paths
+  and object ids.
 - Route all Git calls through `_run_git()` and human or JSON output through
   `cli.py`.
 - Anchor source patterns to the repository root. Matching at any depth requires

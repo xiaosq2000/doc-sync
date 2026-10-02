@@ -1,20 +1,53 @@
 from __future__ import annotations
 
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 
 from doc_sync.git import (
     GitError,
-    changed_base_paths,
-    changed_staged_paths,
     changed_worktree_paths,
+    head_commit,
+    last_change_commit,
+    object_ids,
     resolve_root,
 )
 from tests.support import commit_all, git, initialize_repository
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def _blob_id(root: Path, content: bytes) -> str:
+    """Return the id Git gives these exact bytes, without filters."""
+    result = subprocess.run(
+        ["git", "-C", str(root), "hash-object", "--stdin", "--no-filters"],
+        input=content,
+        check=True,
+        capture_output=True,
+    )
+    return result.stdout.decode().strip()
+
+
+def _add_submodule(root: Path, library: Path) -> Path:
+    """Commit a submodule at `vendor/lib` whose clone can make commits."""
+    initialize_repository(library)
+    (library / "lib.txt").write_text("one", encoding="utf-8")
+    commit_all(library)
+    git(
+        root,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        library.as_uri(),
+        "vendor/lib",
+    )
+    commit_all(root)
+    submodule = root / "vendor/lib"
+    initialize_repository(submodule)
+    return submodule
 
 
 def test_reports_staged_and_untracked_paths_before_the_first_commit(
@@ -40,13 +73,23 @@ def test_reports_staged_unstaged_untracked_and_deleted_paths(
     (empty_repository / "untracked.txt").write_text("new", encoding="utf-8")
     (empty_repository / "deleted.txt").unlink()
 
-    assert changed_staged_paths(empty_repository) == ("staged.txt",)
     assert changed_worktree_paths(empty_repository) == (
         "deleted.txt",
         "staged.txt",
         "unstaged.txt",
         "untracked.txt",
     )
+
+
+def test_reports_paths_changed_since_a_commit(empty_repository: Path) -> None:
+    (empty_repository / "one.txt").write_text("one", encoding="utf-8")
+    commit_all(empty_repository)
+    base = git(empty_repository, "rev-parse", "HEAD")
+    (empty_repository / "two.txt").write_text("two", encoding="utf-8")
+    commit_all(empty_repository, "second")
+    (empty_repository / "three.txt").write_text("three", encoding="utf-8")
+
+    assert changed_worktree_paths(empty_repository, base) == ("three.txt", "two.txt")
 
 
 @pytest.mark.posix_only
@@ -62,22 +105,7 @@ def test_preserves_newline_in_file_name(empty_repository: Path) -> None:
 def test_reports_a_submodule_commit_but_not_edits_inside_it(
     empty_repository: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    library = tmp_path_factory.mktemp("library")
-    initialize_repository(library)
-    (library / "lib.txt").write_text("one", encoding="utf-8")
-    commit_all(library)
-    git(
-        empty_repository,
-        "-c",
-        "protocol.file.allow=always",
-        "submodule",
-        "add",
-        library.as_uri(),
-        "vendor/lib",
-    )
-    commit_all(empty_repository)
-    submodule = empty_repository / "vendor/lib"
-    initialize_repository(submodule)
+    submodule = _add_submodule(empty_repository, tmp_path_factory.mktemp("library"))
 
     (submodule / "lib.txt").write_text("edited", encoding="utf-8")
     assert changed_worktree_paths(empty_repository) == ()
@@ -86,22 +114,104 @@ def test_reports_a_submodule_commit_but_not_edits_inside_it(
     assert changed_worktree_paths(empty_repository) == ("vendor/lib",)
 
 
-def test_reports_paths_from_merge_base(empty_repository: Path) -> None:
+def test_head_commit_is_none_before_the_first_commit(empty_repository: Path) -> None:
+    assert head_commit(empty_repository) is None
+
     (empty_repository / "one.txt").write_text("one", encoding="utf-8")
     commit_all(empty_repository)
-    base = git(empty_repository, "rev-parse", "HEAD")
-    (empty_repository / "two.txt").write_text("two", encoding="utf-8")
+
+    assert head_commit(empty_repository) == git(empty_repository, "rev-parse", "HEAD")
+
+
+def test_finds_the_commit_that_last_added_a_text(empty_repository: Path) -> None:
+    assert last_change_commit(empty_repository, "notes.txt", "alpha") is None
+    notes = empty_repository / "notes.txt"
+    notes.write_text("alpha\n", encoding="utf-8")
+    commit_all(empty_repository)
+    added = git(empty_repository, "rev-parse", "HEAD")
+    notes.write_text("alpha\nbeta\n", encoding="utf-8")
     commit_all(empty_repository, "second")
 
-    assert changed_base_paths(empty_repository, base) == ("two.txt",)
+    assert last_change_commit(empty_repository, "notes.txt", "alpha") == added
+    assert last_change_commit(empty_repository, "notes.txt", "gamma") is None
 
 
-def test_rejects_option_like_base(empty_repository: Path) -> None:
-    (empty_repository / "initial.txt").write_text("initial", encoding="utf-8")
+def test_object_ids_use_git_ids_for_tracked_changed_and_untracked_files(
+    empty_repository: Path,
+) -> None:
+    root = empty_repository
+    for name in ("same.txt", "edited.txt", "deleted.txt"):
+        (root / name).write_text(name, encoding="utf-8")
+    (root / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    commit_all(root)
+    (root / "edited.txt").write_text("new content", encoding="utf-8")
+    (root / "deleted.txt").unlink()
+    (root / "untracked.txt").write_text("untracked", encoding="utf-8")
+    (root / "ignored.txt").write_text("ignored", encoding="utf-8")
+
+    ids = object_ids(root)
+
+    assert ids == {
+        ".gitignore": _blob_id(root, b"ignored.txt\n"),
+        "edited.txt": _blob_id(root, b"new content"),
+        "same.txt": _blob_id(root, b"same.txt"),
+        "untracked.txt": _blob_id(root, b"untracked"),
+    }
+
+
+def test_object_ids_hash_a_conflicted_file_from_the_working_tree(
+    empty_repository: Path,
+) -> None:
+    root = empty_repository
+    notes = root / "notes.txt"
+    notes.write_text("base\n", encoding="utf-8")
+    commit_all(root)
+    git(root, "switch", "-q", "-c", "other")
+    notes.write_text("theirs\n", encoding="utf-8")
+    commit_all(root, "theirs")
+    git(root, "switch", "-q", "-")
+    notes.write_text("ours\n", encoding="utf-8")
+    commit_all(root, "ours")
+    with pytest.raises(subprocess.CalledProcessError):
+        git(root, "merge", "-q", "other")
+
+    assert object_ids(root) == {"notes.txt": _blob_id(root, notes.read_bytes())}
+
+
+def test_object_ids_apply_line_ending_conversion(empty_repository: Path) -> None:
+    git(empty_repository, "config", "core.autocrlf", "true")
+    (empty_repository / "notes.txt").write_bytes(b"one\r\ntwo\r\n")
+
+    assert object_ids(empty_repository) == {
+        "notes.txt": _blob_id(empty_repository, b"one\ntwo\n")
+    }
+
+
+@pytest.mark.posix_only
+def test_object_ids_hash_a_symlink_by_its_target(empty_repository: Path) -> None:
+    (empty_repository / "target.txt").write_text("target", encoding="utf-8")
+    (empty_repository / "link").symlink_to("target.txt")
+    untracked = object_ids(empty_repository)["link"]
     commit_all(empty_repository)
 
-    with pytest.raises(GitError):
-        changed_base_paths(empty_repository, "--output=unexpected")
+    assert untracked == git(empty_repository, "rev-parse", ":link")
+    assert untracked == _blob_id(empty_repository, b"target.txt")
+
+
+def test_object_ids_follow_the_checked_out_submodule_commit(
+    empty_repository: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    submodule = _add_submodule(empty_repository, tmp_path_factory.mktemp("library"))
+    recorded = git(empty_repository, "rev-parse", ":vendor/lib")
+    assert object_ids(empty_repository)["vendor/lib"] == recorded
+
+    (submodule / "lib.txt").write_text("edited", encoding="utf-8")
+    assert object_ids(empty_repository)["vendor/lib"] == recorded
+
+    commit_all(submodule, "second")
+    assert object_ids(empty_repository)["vendor/lib"] == git(
+        submodule, "rev-parse", "HEAD"
+    )
 
 
 def test_git_failure_is_not_an_empty_change_set(root: Path) -> None:

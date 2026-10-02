@@ -1,46 +1,82 @@
-"""Pure matching of changed source paths to documents."""
+"""Pure matching of repository paths to documents."""
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from doc_sync.paths import SourcePattern, normalize_path
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
     from doc_sync.config import Document
+
+FINGERPRINT_LENGTH = 16
 
 
 @dataclass(frozen=True)
 class Review:
-    """One document and the changed sources that caused its review."""
+    """One document that needs review and the changed sources behind it."""
 
     document: str
     sources: tuple[str, ...]
+    since: str | None = None
+    stamped: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible representation."""
-        return {"path": self.document, "sources": list(self.sources)}
+        return {
+            "path": self.document,
+            "since": self.since,
+            "sources": list(self.sources),
+            "stamped": self.stamped,
+        }
+
+
+def matched_paths(document: Document, paths: Iterable[str]) -> tuple[str, ...]:
+    """Return the paths that a document's sources match, except the document."""
+    patterns = tuple(SourcePattern(source) for source in document.sources)
+    return tuple(
+        sorted(
+            path
+            for path in paths
+            if path != document.path
+            and any(pattern.matches(path) for pattern in patterns)
+        )
+    )
+
+
+def fingerprint(document: Document, object_ids: Mapping[str, str]) -> str:
+    """Hash the path and object id of every file that a document's sources match."""
+    digest = hashlib.sha256()
+    for path in matched_paths(document, object_ids):
+        digest.update(f"{path}\0{object_ids[path]}\0".encode(errors="surrogateescape"))
+    return digest.hexdigest()[:FINGERPRINT_LENGTH]
+
+
+def stale_documents(
+    documents: Iterable[Document],
+    object_ids: Mapping[str, str],
+    lock: Mapping[str, str],
+) -> tuple[Document, ...]:
+    """Return documents whose fingerprint differs from the one in the lock."""
+    return tuple(
+        document
+        for document in documents
+        if lock.get(document.path) != fingerprint(document, object_ids)
+    )
 
 
 def evaluate(
     documents: Iterable[Document], changed_paths: Iterable[str]
 ) -> tuple[Review, ...]:
     """Return unchanged documents whose configured sources changed."""
-    changed = tuple(sorted({normalize_path(path) for path in changed_paths if path}))
-    changed_set = set(changed)
+    changed = {normalize_path(path) for path in changed_paths if path}
     reviews: list[Review] = []
-
     for document in documents:
-        patterns = tuple(SourcePattern(source) for source in document.sources)
-        matched = tuple(
-            path
-            for path in changed
-            if any(pattern.matches(path) for pattern in patterns)
-        )
-        if matched and document.path not in changed_set:
+        matched = matched_paths(document, changed)
+        if matched and document.path not in changed:
             reviews.append(Review(document=document.path, sources=matched))
-
     return tuple(reviews)

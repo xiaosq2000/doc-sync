@@ -9,20 +9,30 @@ from typing import TYPE_CHECKING
 
 from doc_sync.config import (
     CONFIG_FILENAME,
+    Document,
     MissingConfigError,
     load_config,
     validate_repository_config,
 )
 from doc_sync.errors import DocSyncError
 from doc_sync.git import (
-    changed_base_paths,
-    changed_staged_paths,
     changed_worktree_paths,
+    head_commit,
+    last_change_commit,
+    object_ids,
     resolve_root,
     worktree_paths,
 )
 from doc_sync.hook import HookContext, blocking_output, parse_context
-from doc_sync.match import Review, evaluate
+from doc_sync.lock import LOCK_FILENAME, entry_line, read_lock, write_lock
+from doc_sync.match import (
+    Review,
+    evaluate,
+    fingerprint,
+    matched_paths,
+    stale_documents,
+)
+from doc_sync.paths import normalize_path
 from doc_sync.render import HOOK_GUIDANCE, build_review_message
 from doc_sync.state import (
     AcknowledgementStore,
@@ -42,12 +52,32 @@ _NO_REVIEW_MESSAGE = "doc-sync: no documents need review"
 _DISPATCH_KEYS = frozenset({"command", "handler"})
 
 
-def _changed_paths(root: Path, *, staged: bool, base: str | None) -> tuple[str, ...]:
-    if staged:
-        return changed_staged_paths(root)
-    if base:
-        return changed_base_paths(root, base)
-    return changed_worktree_paths(root)
+def _reviews(
+    root: Path, documents: tuple[Document, ...], ids: dict[str, str]
+) -> tuple[Review, ...]:
+    """Describe each stale document with the sources changed since its stamp."""
+    lock = read_lock(root / LOCK_FILENAME)
+    changed: dict[str | None, tuple[str, ...]] = {}
+    reviews: list[Review] = []
+    for document in stale_documents(documents, ids, lock):
+        recorded = lock.get(document.path)
+        if recorded is None:
+            reviews.append(Review(document=document.path, sources=(), stamped=False))
+            continue
+        # A stamp that is not committed yet was made after HEAD.
+        since = last_change_commit(
+            root, LOCK_FILENAME, entry_line(document.path, recorded)
+        ) or head_commit(root)
+        if since not in changed:
+            changed[since] = changed_worktree_paths(root, since)
+        reviews.append(
+            Review(
+                document=document.path,
+                sources=matched_paths(document, changed[since]),
+                since=since,
+            )
+        )
+    return tuple(reviews)
 
 
 def _payload(reviews: tuple[Review, ...]) -> dict[str, object]:
@@ -62,11 +92,11 @@ def _write_json(value: object) -> None:
     sys.stdout.write("\n")
 
 
-def _run_check(*, staged: bool, base: str | None, json_output: bool) -> int:
+def _run_check(*, json_output: bool) -> int:
     root = resolve_root()
     config = load_config(root / CONFIG_FILENAME)
-    documents = config.resolve(worktree_paths(root))
-    reviews = evaluate(documents, _changed_paths(root, staged=staged, base=base))
+    ids = object_ids(root)
+    reviews = _reviews(root, config.resolve(ids), ids)
     if json_output:
         _write_json(_payload(reviews))
     elif reviews:
@@ -74,6 +104,38 @@ def _run_check(*, staged: bool, base: str | None, json_output: bool) -> int:
     else:
         print(_NO_REVIEW_MESSAGE)
     return EXIT_REVIEW_REQUIRED if reviews else 0
+
+
+def _run_stamp(*, documents: list[str], all_documents: bool) -> int:
+    if bool(documents) == all_documents:
+        raise DocSyncError("name the documents to stamp, or pass --all alone")
+    root = resolve_root()
+    config = load_config(root / CONFIG_FILENAME)
+    ids = object_ids(root)
+    resolved = {document.path: document for document in config.resolve(ids)}
+    targets = (
+        list(resolved)
+        if all_documents
+        else [normalize_path(path) for path in documents]
+    )
+    unknown = [path for path in targets if path not in resolved]
+    if unknown:
+        rendered = ", ".join(f"`{path}`" for path in unknown)
+        raise DocSyncError(f"not a configured document: {rendered}")
+
+    lock_path = root / LOCK_FILENAME
+    # Entries for documents that are no longer configured are dropped.
+    lock = {
+        path: recorded
+        for path, recorded in read_lock(lock_path).items()
+        if path in resolved
+    }
+    for path in targets:
+        lock[path] = fingerprint(resolved[path], ids)
+    write_lock(lock_path, lock)
+    for path in targets:
+        print(f"stamped {path}")
+    return 0
 
 
 def _run_validate() -> int:
@@ -162,12 +224,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    check = subparsers.add_parser("check", help="Check changed source files.")
-    source = check.add_mutually_exclusive_group()
-    source.add_argument("--staged", action="store_true", help="Check staged files.")
-    source.add_argument("--base", help="Check committed files changed from this ref.")
+    check = subparsers.add_parser("check", help="List documents that need review.")
     check.add_argument("--json", dest="json_output", action="store_true")
     check.set_defaults(handler=_run_check)
+
+    stamp = subparsers.add_parser("stamp", help="Record that documents were reviewed.")
+    stamp.add_argument(
+        "documents", nargs="*", metavar="document", help="A repository-relative path."
+    )
+    stamp.add_argument(
+        "--all", dest="all_documents", action="store_true", help="Stamp every document."
+    )
+    stamp.set_defaults(handler=_run_stamp)
 
     validate = subparsers.add_parser("validate", help="Validate doc-sync.toml.")
     validate.set_defaults(handler=_run_validate)

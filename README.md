@@ -4,8 +4,8 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 Doc-sync finds documents that may need review after source files change. It
-uses a repository configuration and Git. It does not call an LLM or guess what
-the source change means.
+uses a repository configuration, a committed record of reviews, and Git. It
+does not call an LLM or guess what the source change means.
 
 ## Install
 
@@ -41,8 +41,10 @@ a document, and its value lists the source patterns that may affect it.
 ]
 ```
 
-When a source pattern matches a changed file and the document is unchanged,
-doc-sync asks for a review. A changed document needs no further review.
+`doc-sync check` reports a document when the files its sources match have
+changed since its last review was stamped. The [Stop hook](#add-a-stop-hook)
+reports a document when a source changed during the session and the document
+did not.
 
 ### Source patterns
 
@@ -99,18 +101,37 @@ When several keys name the same document, the document watches the sources of
 all of them. An exact key can therefore add sources to a document that a glob
 already covers.
 
-## Check changes
+## Check and stamp documents
 
-Run a check against the working tree, staged files, or a merge base:
+`doc-sync.lock` records a fingerprint of each document's sources at its last
+review. Commit it together with the documents and sources it describes.
 
 ```bash
 doc-sync check
-doc-sync check --staged
-doc-sync check --base origin/main
+doc-sync stamp README.md
+doc-sync stamp --all
 ```
 
-A manual check always prints a result. It exits `0` when no document needs
-review, `2` when review is required, and `1` for configuration or Git errors.
+`check` compares each document's current fingerprint with the lock. A document
+needs review when its sources have changed since it was stamped, or when it was
+never stamped. The command always prints a result. It exits `0` when no document
+needs review, `2` when review is required, and `1` for configuration or Git
+errors.
+
+After you review a document, and update it if needed, record the review with
+`doc-sync stamp` and the document's repository-relative path. Editing a document
+does not record a review. `stamp --all` stamps every document, which is how a
+repository starts using the lock. Every stamp also drops entries for documents
+that are no longer configured.
+
+A fingerprint covers the Git object id of every file that the document's sources
+match, except the document itself. It is the same on every clone and platform,
+so a pre-commit hook, CI, and other people all get the same answer. Reverting a
+source change makes the document current again.
+
+Entries are separated by blank lines, so stamps of different documents merge
+cleanly. When a merge leaves an entry in conflict, `check` reports that document
+and `stamp` rewrites the file.
 
 Use `--json` for scripts:
 
@@ -119,12 +140,19 @@ Use `--json` for scripts:
   "documents": [
     {
       "path": "README.md",
-      "sources": ["src/client.py"]
+      "since": "9c1b2e7d41f0a3c2b5e8d6f4a1c0b9e8d7f6a5c4",
+      "sources": ["src/client.py"],
+      "stamped": true
     }
   ],
   "status": "review_required"
 }
 ```
+
+`since` is the commit that recorded the current stamp. For a stamp that is not
+committed yet, it is the commit at `HEAD`. `sources` lists the matched files that
+changed since that commit. A document that was never stamped has `stamped` set
+to `false`, `since` set to `null`, and no sources.
 
 Validate the configuration:
 
@@ -218,15 +246,24 @@ doc-sync disable
 doc-sync enable
 ```
 
-Manual `check` and `validate` commands still run while the hook is disabled.
+Manual `check`, `stamp`, and `validate` commands still run while the hook is
+disabled.
 The switch is local to one checkout and is stored beside acknowledgement state
 under Git metadata.
 
 ## Pre-commit
 
-The repository publishes a `doc-sync-validate` pre-commit hook. It runs
-`doc-sync validate` and does not receive changed filenames. Pre-commit hides the
-warnings of a passing hook unless the hook sets `verbose: true`.
+The repository publishes two pre-commit hooks. Neither receives changed
+filenames.
+
+| Hook | Command | Use |
+| --- | --- | --- |
+| `doc-sync-validate` | `doc-sync validate` | Catch configuration errors |
+| `doc-sync-check` | `doc-sync check` | Block commits while documents need review |
+
+Pre-commit sets unstaged changes aside while hooks run, so stage
+`doc-sync.lock` with the rest of the commit. It also hides the warnings of a
+passing hook unless the hook sets `verbose: true`.
 
 ## License
 

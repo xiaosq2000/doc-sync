@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
 from doc_sync.errors import DocSyncError
+
+# Paths per `git hash-object` call, which keeps the command line short.
+_HASH_BATCH = 200
 
 
 class GitError(DocSyncError, RuntimeError):
     """Raised when doc-sync cannot query repository state."""
 
 
-def _run_git(root: Path, arguments: list[str]) -> bytes:
+def _run_git(root: Path, arguments: list[str], *, stdin: bytes | None = None) -> bytes:
     try:
         result = subprocess.run(  # noqa: S603
             ["git", "-C", str(root), *arguments],  # noqa: S607
+            input=stdin,
             capture_output=True,
             check=False,
         )
@@ -39,17 +44,35 @@ def resolve_root(raw_root: str | None = None) -> Path:
     return Path(os.fsdecode(output).strip()).resolve()
 
 
-def changed_worktree_paths(root: Path) -> tuple[str, ...]:
-    """Return staged, unstaged, and untracked non-ignored paths."""
+def head_commit(root: Path) -> str | None:
+    """Return the commit at HEAD, or None before the first commit."""
     try:
-        # A submodule counts when its commit changes, not when files inside it
-        # are edited.
-        tracked = _nul_paths(
-            _run_git(
-                root, ["diff", "--name-only", "-z", "--ignore-submodules=dirty", "HEAD"]
-            )
-        )
+        output = _run_git(root, ["rev-parse", "--verify", "HEAD"])
     except GitError:
+        return None
+    return os.fsdecode(output).strip()
+
+
+def last_change_commit(root: Path, path: str, text: str) -> str | None:
+    """Return the latest commit that changed how often `text` occurs in `path`."""
+    try:
+        output = _run_git(root, ["log", "-1", "--format=%H", f"-S{text}", "--", path])
+    except GitError:
+        # Before the first commit there is no history to search.
+        return None
+    return os.fsdecode(output).strip() or None
+
+
+def changed_worktree_paths(root: Path, commit: str | None = None) -> tuple[str, ...]:
+    """Return paths changed since a commit, HEAD by default, and untracked paths."""
+    # A submodule counts when its commit changes, not when files inside it are
+    # edited.
+    diff = ["diff", "--name-only", "-z", "--ignore-submodules=dirty"]
+    try:
+        tracked = _nul_paths(_run_git(root, [*diff, commit or "HEAD", "--"]))
+    except GitError:
+        if commit is not None:
+            raise
         # Unborn HEAD: the index is the only thing there is to compare against.
         # Asking first would cost an extra `git` spawn on every agent hook fire.
         tracked = _nul_paths(_run_git(root, ["diff", "--cached", "--name-only", "-z"]))
@@ -84,31 +107,74 @@ def worktree_paths(root: Path) -> tuple[str, ...]:
     )
 
 
-def changed_staged_paths(root: Path) -> tuple[str, ...]:
-    """Return paths changed in the Git index."""
-    return tuple(
-        sorted(_nul_paths(_run_git(root, ["diff", "--cached", "--name-only", "-z"])))
+def object_ids(root: Path) -> dict[str, str]:
+    """Return the Git object id of every tracked or non-ignored untracked path.
+
+    Unchanged files keep their index ids. Changed and untracked files are hashed
+    with Git's filters, so the ids agree across clones and platforms. A symlink
+    is hashed by its target and a submodule by its checked-out commit. Deleted
+    paths are left out.
+    """
+    ids: dict[str, str] = {}
+    changed: set[str] = set()
+    for entry in _nul_paths(_run_git(root, ["ls-files", "--stage", "-z"])):
+        info, _, path = entry.partition("\t")
+        _mode, object_id, stage = info.split(" ")
+        if stage == "0":
+            ids[path] = object_id
+        else:
+            # A conflicted path has one entry per side and conflict markers in
+            # the working tree.
+            changed.add(path)
+    changed.update(
+        _nul_paths(
+            _run_git(root, ["diff", "--name-only", "-z", "--ignore-submodules=dirty"])
+        )
+    )
+    changed.update(
+        path
+        for path in _nul_paths(
+            _run_git(root, ["ls-files", "--others", "--exclude-standard", "-z"])
+        )
+        # Git lists an untracked nested repository as a directory.
+        if not path.endswith("/")
     )
 
+    files: list[str] = []
+    for path in sorted(changed):
+        ids.pop(path, None)
+        if (object_id := _special_object_id(root, path, files)) is not None:
+            ids[path] = object_id
+    for start in range(0, len(files), _HASH_BATCH):
+        batch = files[start : start + _HASH_BATCH]
+        output = os.fsdecode(_run_git(root, ["hash-object", "--", *batch]))
+        ids.update(zip(batch, output.split(), strict=True))
+    return ids
 
-def changed_base_paths(root: Path, base: str) -> tuple[str, ...]:
-    """Return committed paths changed from a merge base through HEAD."""
-    base_commit = os.fsdecode(
-        _run_git(
-            root,
-            ["rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}"],
-        )
-    ).strip()
-    return tuple(
-        sorted(
-            _nul_paths(
-                _run_git(
-                    root,
-                    ["diff", "--name-only", "-z", f"{base_commit}...HEAD", "--"],
-                )
-            )
-        )
-    )
+
+def _special_object_id(root: Path, path: str, files: list[str]) -> str | None:
+    """Hash a changed symlink or submodule, or queue a regular file for hashing."""
+    location = root / path
+    try:
+        mode = location.lstat().st_mode
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if stat.S_ISREG(mode):
+        files.append(path)
+        return None
+    if stat.S_ISLNK(mode):
+        # `git hash-object` would follow the link, but Git stores its target.
+        target = os.fsencode(location.readlink())
+        return os.fsdecode(
+            _run_git(root, ["hash-object", "--stdin"], stdin=target)
+        ).strip()
+    if stat.S_ISDIR(mode) and (location / ".git").exists():
+        try:
+            output = _run_git(location, ["rev-parse", "--verify", "HEAD"])
+        except GitError:
+            return None
+        return os.fsdecode(output).strip()
+    return None
 
 
 def git_metadata_path(root: Path, relative_path: str) -> Path:

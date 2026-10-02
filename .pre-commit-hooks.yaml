@@ -5,3 +5,10 @@
   language: python
   pass_filenames: false
   always_run: true
+- id: doc-sync-check
+  name: check documentation reviews
+  description: Fail while a document's sources changed since its last stamp.
+  entry: doc-sync check
+  language: python
+  pass_filenames: false
+  always_run: true

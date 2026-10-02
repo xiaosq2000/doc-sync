@@ -51,9 +51,9 @@ uv tool uninstall doc-sync
 pipx uninstall doc-sync
 ```
 
-The repository configuration remains at `doc-sync.toml`. Hook state remains
-under `git rev-parse --git-path doc-sync`. Remove either path yourself if you no
-longer need it.
+The repository files `doc-sync.toml` and `doc-sync.lock` remain in place. Hook
+state remains under `git rev-parse --git-path doc-sync`. Remove these paths
+yourself if you no longer need them.
 
 ## Troubleshooting
 

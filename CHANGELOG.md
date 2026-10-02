@@ -7,6 +7,10 @@ Semantic Versioning after its first stable release.
 
 ### Added
 
+- `doc-sync.lock` records a fingerprint of each document's sources at its last
+  review, and `doc-sync stamp` writes it. Run `doc-sync stamp --all` once to
+  start a repository on the lock.
+- A `doc-sync-check` pre-commit hook runs `doc-sync check`.
 - A `[sets]` table names source lists that documents include with `@name`.
 - Document keys may be globs. A glob names every matching file, including files
   created later, and a document named by several keys watches the sources of
@@ -17,12 +21,20 @@ Semantic Versioning after its first stable release.
 
 ### Changed
 
+- `check` compares documents with the lock instead of a diff. A document needs
+  review until it is stamped again, and editing it no longer counts as a
+  review. Each JSON document adds `since` and `stamped`.
 - A directory pattern without glob characters also matches a submodule or
-  symlink at that path. `check` counts a submodule when its commit changes and
-  ignores edits inside it.
+  symlink at that path. A submodule counts when its commit changes and not when
+  files inside it are edited.
 - `validate` fails when a glob key matches no document.
 - A source that starts with `@` names a set. Write `./@name` for a root path
   that starts with `@`.
+
+### Removed
+
+- `check --staged` and `check --base`. The lock gives one answer for the
+  repository state, so there is no diff to select.
 
 ## 0.1.0a2
 
