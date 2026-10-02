@@ -18,7 +18,8 @@ CHECK_GUIDANCE = (
 )
 HOOK_GUIDANCE = (
     f"{_REVIEW_GUIDANCE}\n"
-    "If no update is needed, stop again without changing the document."
+    "Then record the review with `doc-sync stamp <document>`, also when no update "
+    "is needed."
 )
 
 

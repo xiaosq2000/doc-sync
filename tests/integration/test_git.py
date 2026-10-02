@@ -13,7 +13,7 @@ from doc_sync.git import (
     object_ids,
     resolve_root,
 )
-from tests.support import commit_all, git, initialize_repository
+from tests.support import add_submodule, commit_all, git
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -28,26 +28,6 @@ def _blob_id(root: Path, content: bytes) -> str:
         capture_output=True,
     )
     return result.stdout.decode().strip()
-
-
-def _add_submodule(root: Path, library: Path) -> Path:
-    """Commit a submodule at `vendor/lib` whose clone can make commits."""
-    initialize_repository(library)
-    (library / "lib.txt").write_text("one", encoding="utf-8")
-    commit_all(library)
-    git(
-        root,
-        "-c",
-        "protocol.file.allow=always",
-        "submodule",
-        "add",
-        library.as_uri(),
-        "vendor/lib",
-    )
-    commit_all(root)
-    submodule = root / "vendor/lib"
-    initialize_repository(submodule)
-    return submodule
 
 
 def test_reports_staged_and_untracked_paths_before_the_first_commit(
@@ -105,7 +85,7 @@ def test_preserves_newline_in_file_name(empty_repository: Path) -> None:
 def test_reports_a_submodule_commit_but_not_edits_inside_it(
     empty_repository: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    submodule = _add_submodule(empty_repository, tmp_path_factory.mktemp("library"))
+    submodule = add_submodule(empty_repository, tmp_path_factory.mktemp("library"))
 
     (submodule / "lib.txt").write_text("edited", encoding="utf-8")
     assert changed_worktree_paths(empty_repository) == ()
@@ -201,7 +181,7 @@ def test_object_ids_hash_a_symlink_by_its_target(empty_repository: Path) -> None
 def test_object_ids_follow_the_checked_out_submodule_commit(
     empty_repository: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    submodule = _add_submodule(empty_repository, tmp_path_factory.mktemp("library"))
+    submodule = add_submodule(empty_repository, tmp_path_factory.mktemp("library"))
     recorded = git(empty_repository, "rev-parse", ":vendor/lib")
     assert object_ids(empty_repository)["vendor/lib"] == recorded
 

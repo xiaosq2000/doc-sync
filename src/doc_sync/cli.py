@@ -25,13 +25,7 @@ from doc_sync.git import (
 )
 from doc_sync.hook import HookContext, blocking_output, parse_context
 from doc_sync.lock import LOCK_FILENAME, entry_line, read_lock, write_lock
-from doc_sync.match import (
-    Review,
-    evaluate,
-    fingerprint,
-    matched_paths,
-    stale_documents,
-)
+from doc_sync.match import Review, fingerprint, matched_paths, stale_documents
 from doc_sync.paths import normalize_path
 from doc_sync.render import HOOK_GUIDANCE, build_review_message
 from doc_sync.state import (
@@ -39,11 +33,11 @@ from doc_sync.state import (
     BaselineStore,
     default_state_directory,
     is_disabled,
-    session_changed_paths,
     set_disabled,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
 
 EXIT_ERROR = 1
@@ -52,14 +46,13 @@ _NO_REVIEW_MESSAGE = "doc-sync: no documents need review"
 _DISPATCH_KEYS = frozenset({"command", "handler"})
 
 
-def _reviews(
-    root: Path, documents: tuple[Document, ...], ids: dict[str, str]
+def _describe(
+    root: Path, documents: Iterable[Document], lock: Mapping[str, str]
 ) -> tuple[Review, ...]:
-    """Describe each stale document with the sources changed since its stamp."""
-    lock = read_lock(root / LOCK_FILENAME)
+    """Describe stale documents with the sources changed since their stamps."""
     changed: dict[str | None, tuple[str, ...]] = {}
     reviews: list[Review] = []
-    for document in stale_documents(documents, ids, lock):
+    for document in documents:
         recorded = lock.get(document.path)
         if recorded is None:
             reviews.append(Review(document=document.path, sources=(), stamped=False))
@@ -96,7 +89,8 @@ def _run_check(*, json_output: bool) -> int:
     root = resolve_root()
     config = load_config(root / CONFIG_FILENAME)
     ids = object_ids(root)
-    reviews = _reviews(root, config.resolve(ids), ids)
+    lock = read_lock(root / LOCK_FILENAME)
+    reviews = _describe(root, stale_documents(config.resolve(ids), ids, lock), lock)
     if json_output:
         _write_json(_payload(reviews))
     elif reviews:
@@ -154,37 +148,39 @@ def _hook_reviews(*, root: Path, context: HookContext) -> tuple[Review, ...] | N
     if is_disabled(state_directory):
         return None
 
-    config_path = root / CONFIG_FILENAME
-    config = load_config(config_path)
+    config = load_config(root / CONFIG_FILENAME)
     session_id = context.session_id
-    store = AcknowledgementStore(state_directory)
+    acknowledgements = AcknowledgementStore(state_directory)
     baselines = BaselineStore(state_directory)
     baseline = baselines.load(session_id)
+    # SessionStart also fires on resume and compaction, which keep the baseline.
+    if baseline is not None and context.hook_event_name == "SessionStart":
+        return None
+
+    ids = object_ids(root)
+    documents = config.resolve(ids)
+    current = {document.path: fingerprint(document, ids) for document in documents}
     if baseline is None:
-        baselines.capture(session_id=session_id, root=root)
-        store.clear(session_id)
+        baselines.capture(session_id=session_id, fingerprints=current)
+        acknowledgements.clear(session_id)
         return None
-    if context.hook_event_name == "SessionStart":
-        return None
-    paths = worktree_paths(root)
-    documents = config.resolve(paths)
-    reviews = evaluate(
-        documents,
-        session_changed_paths(
-            root=root, baseline=baseline, documents=documents, paths=paths
-        ),
+
+    # Report documents that went stale during this session. Staleness from
+    # before the session is left to `doc-sync check`.
+    lock = read_lock(root / LOCK_FILENAME)
+    candidates = {
+        path: value
+        for path, value in current.items()
+        if value not in {lock.get(path), baseline.get(path)}
+    }
+    unreported = set(
+        acknowledgements.unreported(session_id=session_id, candidates=candidates)
     )
-    if not reviews:
-        store.clear(session_id)
+    if not unreported:
         return None
-    if not store.should_prompt(
-        session_id=session_id,
-        root=root,
-        config_path=config_path,
-        reviews=reviews,
-    ):
-        return None
-    return reviews
+    return _describe(
+        root, (document for document in documents if document.path in unreported), lock
+    )
 
 
 def _run_hook() -> int:

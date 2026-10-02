@@ -12,8 +12,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
-APPLICATION_DOCUMENT = Document(path="README.md", sources=("src/",))
-
 
 def git(root: Path, *arguments: str) -> str:
     result = subprocess.run(
@@ -34,6 +32,26 @@ def initialize_repository(root: Path) -> None:
 def commit_all(root: Path, message: str = "initial") -> None:
     git(root, "add", "-A")
     git(root, "commit", "-qm", message)
+
+
+def add_submodule(root: Path, library: Path) -> Path:
+    """Commit a submodule at `vendor/lib` whose clone can make commits."""
+    initialize_repository(library)
+    (library / "lib.txt").write_text("one", encoding="utf-8")
+    commit_all(library)
+    git(
+        root,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        library.as_uri(),
+        "vendor/lib",
+    )
+    commit_all(root)
+    submodule = root / "vendor/lib"
+    initialize_repository(submodule)
+    return submodule
 
 
 def render_config(documents: Iterable[Document]) -> str:

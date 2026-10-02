@@ -13,7 +13,7 @@ from doc_sync.config import (
     load_config,
     validate_repository_config,
 )
-from doc_sync.match import Review, evaluate
+from doc_sync.match import matched_paths
 from tests.support import write_config
 
 if TYPE_CHECKING:
@@ -108,8 +108,9 @@ def test_directory_templates_keep_glob_characters_literal(root: Path) -> None:
 
     documents = config.resolve(("app/[id]/README.md",))
 
-    assert evaluate(documents, ("app/[id]/page.tsx", "app/i/page.tsx")) == (
-        Review(document="app/[id]/README.md", sources=("app/[id]/page.tsx",)),
+    (document,) = documents
+    assert matched_paths(document, ("app/[id]/page.tsx", "app/i/page.tsx")) == (
+        "app/[id]/page.tsx",
     )
 
 

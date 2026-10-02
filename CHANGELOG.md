@@ -24,6 +24,10 @@ Semantic Versioning after its first stable release.
 - `check` compares documents with the lock instead of a diff. A document needs
   review until it is stamped again, and editing it no longer counts as a
   review. Each JSON document adds `since` and `stamped`.
+- The Stop hook reports a document whose fingerprint differs from both the lock
+  and the session baseline, and stops once the document is stamped. Its
+  reminder lists every source changed since the stamp. Baselines from earlier
+  versions are replaced silently on the next hook call.
 - A directory pattern without glob characters also matches a submodule or
   symlink at that path. A submodule counts when its commit changes and not when
   files inside it are edited.

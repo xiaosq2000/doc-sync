@@ -11,7 +11,7 @@ from doc_sync import state
 from doc_sync.cli import main
 from doc_sync.git import GitError
 from doc_sync.state import BaselineStore, default_state_directory
-from tests.support import commit_all, git, write_config
+from tests.support import add_submodule, commit_all, git, write_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,6 +37,11 @@ class HookRunner:
         assert captured.err == ""
         return captured.out
 
+    def stamp(self, *arguments: str) -> None:
+        self.monkeypatch.chdir(self.root)
+        assert main(["stamp", *(arguments or ("--all",))]) == 0
+        self.capsys.readouterr()
+
 
 @pytest.fixture
 def hook(
@@ -44,7 +49,11 @@ def hook(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> HookRunner:
-    return HookRunner(repository, monkeypatch, capsys)
+    """A repository whose documents are stamped in a committed lock."""
+    runner = HookRunner(repository, monkeypatch, capsys)
+    runner.stamp()
+    commit_all(repository, "stamp")
+    return runner
 
 
 @pytest.mark.parametrize("staged", [False, True])
@@ -55,15 +64,15 @@ def test_existing_edits_do_not_prompt(hook: HookRunner, staged: bool) -> None:
     if staged:
         git(hook.root, "add", "src/app.py")
     assert hook("SessionStart") == ""
-    assert source.read_text(encoding="utf-8") == "before the session"
     source.touch()
     assert hook() == ""
 
     source.write_text("session edit", encoding="utf-8")
     response = json.loads(hook())
     assert response["decision"] == "block"
-    assert "src/app.py" in response["reason"]
-    assert "src/untracked.py" not in response["reason"]
+    # The reminder covers every change since the stamp, from any session.
+    assert "  src/app.py\n  src/untracked.py\n" in response["reason"]
+    assert "doc-sync stamp <document>" in response["reason"]
     assert hook() == ""
 
 
@@ -82,18 +91,23 @@ def test_unrelated_edits_are_silent(hook: HookRunner) -> None:
     assert hook() == ""
 
 
-@pytest.mark.parametrize("document_before_session", [False, True])
-def test_document_edits_use_the_session_baseline(
-    hook: HookRunner, document_before_session: bool
-) -> None:
-    document = hook.root / "README.md"
-    if document_before_session:
-        document.write_text("old document edit", encoding="utf-8")
+def test_stamping_records_the_review_and_editing_does_not(hook: HookRunner) -> None:
     assert hook("SessionStart") == ""
     (hook.root / "src/app.py").write_text("new source", encoding="utf-8")
-    if not document_before_session:
-        document.write_text("session documentation", encoding="utf-8")
-    assert bool(hook()) is document_before_session
+    (hook.root / "README.md").write_text("session documentation", encoding="utf-8")
+    assert "README.md (changed since " in json.loads(hook())["reason"]
+
+    hook.stamp("README.md")
+    assert hook() == ""
+    (hook.root / "src/app.py").write_text("another source edit", encoding="utf-8")
+    assert json.loads(hook())["decision"] == "block"
+
+
+def test_unstamped_documents_are_named(hook: HookRunner) -> None:
+    (hook.root / "doc-sync.lock").unlink()
+    assert hook("SessionStart") == ""
+    (hook.root / "src/app.py").write_text("v2", encoding="utf-8")
+    assert "README.md (never stamped)" in json.loads(hook())["reason"]
 
 
 @pytest.mark.parametrize("change", ["add", "delete", "rename"])
@@ -152,7 +166,12 @@ def test_sessions_have_independent_preserved_baselines(hook: HookRunner) -> None
 
 
 @pytest.mark.parametrize(
-    "corrupt", ["{", '{"version": 99, "paths": {}}', '{"version": 1, "paths": []}']
+    "corrupt",
+    [
+        "{",
+        '{"version": 99, "documents": {}}',
+        '{"version": 1, "paths": {"src/app.py": "missing"}}',
+    ],
 )
 def test_corrupt_baseline_is_replaced_silently(hook: HookRunner, corrupt: str) -> None:
     assert hook("SessionStart") == ""
@@ -164,17 +183,20 @@ def test_corrupt_baseline_is_replaced_silently(hook: HookRunner, corrupt: str) -
     assert hook()
 
 
-def test_new_configuration_uses_original_file_state(hook: HookRunner) -> None:
+def test_configuration_changes_count_when_they_change_matched_files(
+    hook: HookRunner,
+) -> None:
     (hook.root / "other.py").write_text("v1", encoding="utf-8")
     assert hook("SessionStart") == ""
-    write_config(hook.root, sources=("other.py",))
+    write_config(hook.root, sources=("./src/",))
     assert hook() == ""
-    (hook.root / "other.py").write_text("v2", encoding="utf-8")
-    assert "other.py" in json.loads(hook())["reason"]
+    write_config(hook.root, sources=("src/", "other.py"))
+    assert "README.md" in json.loads(hook())["reason"]
 
 
 def test_ignored_files_are_excluded(hook: HookRunner) -> None:
     (hook.root / ".gitignore").write_text("src/ignored.py\n", encoding="utf-8")
+    hook.stamp()
     assert hook("SessionStart") == ""
     (hook.root / "src/ignored.py").write_text("ignored", encoding="utf-8")
     assert hook() == ""
@@ -207,13 +229,26 @@ def test_linked_worktree_has_its_own_baseline(hook: HookRunner, tmp_path: Path) 
     assert default_state_directory(linked) != default_state_directory(hook.root)
 
 
+def test_a_submodule_commit_prompts(
+    hook: HookRunner, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    submodule = add_submodule(hook.root, tmp_path_factory.mktemp("library"))
+    write_config(hook.root, sources=("vendor/lib/",))
+    hook.stamp()
+    assert hook("SessionStart") == ""
+    (submodule / "lib.txt").write_text("edited", encoding="utf-8")
+    assert hook() == ""
+    commit_all(submodule, "second")
+    assert "vendor/lib" in json.loads(hook())["reason"]
+
+
 @pytest.mark.posix_only
-def test_executable_mode_changes_prompt(hook: HookRunner) -> None:
+def test_mode_changes_alone_do_not_prompt(hook: HookRunner) -> None:
     source = hook.root / "src/app.py"
     source.chmod(0o644)
     assert hook("SessionStart") == ""
     source.chmod(0o755)
-    assert hook()
+    assert hook() == ""
 
 
 @pytest.mark.posix_only
@@ -249,6 +284,16 @@ def test_active_stop_never_reads_git_or_state(hook: HookRunner) -> None:
     assert main(["hook"]) == 0
     captured = hook.capsys.readouterr()
     assert captured.out == captured.err == ""
+
+
+def test_resumed_session_start_does_not_read_files(hook: HookRunner) -> None:
+    assert hook("SessionStart") == ""
+
+    def fail(_root: Path) -> None:
+        raise AssertionError("a resumed session keeps its baseline")
+
+    hook.monkeypatch.setattr("doc_sync.cli.object_ids", fail)
+    assert hook("SessionStart") == ""
 
 
 def test_session_start_failure_uses_stderr(hook: HookRunner) -> None:
@@ -291,31 +336,16 @@ def test_missing_config_does_not_create_a_baseline(
     assert not (default_state_directory(hook.root) / "baselines").exists()
 
 
-def test_stop_does_not_hash_unrelated_files(hook: HookRunner) -> None:
-    unrelated = hook.root / "unrelated.txt"
-    unrelated.write_text("unrelated contents", encoding="utf-8")
-    assert hook("SessionStart") == ""
-    original = state._content_marker  # noqa: SLF001 - instrument actual file reads
-
-    def fingerprint(path: Path) -> str:
-        assert path != unrelated
-        return original(path)
-
-    hook.monkeypatch.setattr(state, "_content_marker", fingerprint)
-    unrelated.write_text("changed but irrelevant", encoding="utf-8")
-    assert hook() == ""
-
-
-def test_stop_reports_file_read_failure(hook: HookRunner) -> None:
+def test_stop_reports_a_git_failure(hook: HookRunner) -> None:
     assert hook("SessionStart") == ""
 
-    def fail(_path: Path) -> str:
-        raise PermissionError("source is unreadable")
+    def fail(_root: Path) -> None:
+        raise GitError("object ids are unavailable")
 
-    hook.monkeypatch.setattr(state, "_content_marker", fail)
+    hook.monkeypatch.setattr("doc_sync.cli.object_ids", fail)
     response = json.loads(hook())
     assert response["decision"] == "block"
-    assert "source is unreadable" in response["reason"]
+    assert "object ids are unavailable" in response["reason"]
 
 
 @pytest.mark.posix_only

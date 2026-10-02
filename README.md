@@ -43,8 +43,7 @@ a document, and its value lists the source patterns that may affect it.
 
 `doc-sync check` reports a document when the files its sources match have
 changed since its last review was stamped. The [Stop hook](#add-a-stop-hook)
-reports a document when a source changed during the session and the document
-did not.
+reports the documents whose sources changed during an agent session.
 
 ### Source patterns
 
@@ -209,33 +208,35 @@ broken configuration returns a continuation message at Stop so the agent can
 report or fix it. SessionStart failures are reported on stderr without blocking
 the session.
 
-SessionStart saves a baseline of tracked and non-ignored untracked files. Stop
-checks for changes since that baseline, so pre-existing edits do not trigger a
-reminder when the agent only reads files or answers questions. A document edited
-before the session does not suppress review of source changes made during the
-session. The baseline is preserved when the same session resumes or compacts.
+SessionStart saves a baseline with the fingerprint of every document. At Stop,
+the hook asks for a review of each document whose fingerprint differs from both
+the lock and the baseline. A document that already needed review when the
+session started is left to `doc-sync check`, so a session that only reads files
+or answers questions gets no reminder. The reminder lists every source that
+changed since the document was stamped, and stamping the document clears it.
+The baseline is preserved when the same session resumes or compacts.
 
 Changes made by you or other tools in the same checkout during the session also
-count. Committing session edits does not hide them from the hook. Staging or
-committing existing edits alone does not trigger a reminder. Restoring a file to
-its starting state removes it from the session's changes.
+count, and so does a configuration change that alters a document's matched
+files. Committing session edits does not hide them from the hook. Staging or
+committing existing edits alone does not trigger a reminder. Restoring the
+sources to their starting state removes the document from the reminder.
 
 If a baseline is missing, corrupt, or from an unsupported version, the hook
-saves the current state and stays silent. Existing installations should add the
-SessionStart entry and start a new session to detect edits in the first
+saves the current fingerprints and stays silent. Existing installations should
+add the SessionStart entry and start a new session to detect edits in the first
 response. With only Stop configured, the first Stop establishes the baseline,
 and only later edits can trigger a reminder.
 
 The agent protocol marks a continuation with `stop_hook_active`. Doc-sync lets
 that continuation stop without running another check. It also remembers the
-last review shown in each session, so unchanged source state does not produce a
-reminder on every later turn. A change to a relevant source, document, or
-configuration produces a new reminder.
+fingerprint at which it last reported each document in a session, so a document
+is reported again only after its sources change again.
 
 Baselines and acknowledgements live separately under
-`git rev-parse --git-path doc-sync`. Baselines contain file fingerprints, not
-file contents. Clearing an acknowledgement preserves the baseline. No state
-file enters the working tree, and linked worktrees have separate state.
+`git rev-parse --git-path doc-sync`. They contain document fingerprints, not
+file contents. Clearing an acknowledgement preserves the baseline. No state file
+enters the working tree, and linked worktrees have separate state.
 
 ## Disable the Stop hook locally
 

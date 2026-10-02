@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from doc_sync.paths import SourcePattern, normalize_path
+from doc_sync.paths import SourcePattern
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -67,16 +67,3 @@ def stale_documents(
         for document in documents
         if lock.get(document.path) != fingerprint(document, object_ids)
     )
-
-
-def evaluate(
-    documents: Iterable[Document], changed_paths: Iterable[str]
-) -> tuple[Review, ...]:
-    """Return unchanged documents whose configured sources changed."""
-    changed = {normalize_path(path) for path in changed_paths if path}
-    reviews: list[Review] = []
-    for document in documents:
-        matched = matched_paths(document, changed)
-        if matched and document.path not in changed:
-            reviews.append(Review(document=document.path, sources=matched))
-    return tuple(reviews)

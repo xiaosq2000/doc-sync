@@ -5,54 +5,59 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from doc_sync.match import evaluate
 from doc_sync.state import (
     AcknowledgementStore,
     BaselineStore,
     is_disabled,
     set_disabled,
 )
-from tests.support import APPLICATION_DOCUMENT
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-@pytest.fixture
-def store(uncommitted_repository: Path) -> AcknowledgementStore:
-    return AcknowledgementStore(uncommitted_repository / "state")
+OLD = "1111111111111111"
+NEW = "2222222222222222"
 
 
-def _prompted(store: AcknowledgementStore, root: Path, *changed: str) -> bool:
-    return store.should_prompt(
-        session_id="one",
-        root=root,
-        config_path=root / "doc-sync.toml",
-        reviews=evaluate((APPLICATION_DOCUMENT,), changed),
+def test_reports_each_fingerprint_once_per_session(root: Path) -> None:
+    store = AcknowledgementStore(root / "state")
+
+    assert store.unreported(session_id="one", candidates={"README.md": OLD}) == (
+        "README.md",
+    )
+    assert store.unreported(session_id="one", candidates={"README.md": OLD}) == ()
+    assert store.unreported(session_id="two", candidates={"README.md": OLD}) == (
+        "README.md",
+    )
+    assert store.unreported(session_id="one", candidates={"README.md": NEW}) == (
+        "README.md",
     )
 
 
-def test_acknowledges_each_session_independently(
-    uncommitted_repository: Path, store: AcknowledgementStore
-) -> None:
-    root = uncommitted_repository
-    reviews = evaluate((APPLICATION_DOCUMENT,), ("src/app.py",))
-    arguments = {"root": root, "config_path": root / "doc-sync.toml"}
+def test_reports_only_documents_with_a_new_fingerprint(root: Path) -> None:
+    store = AcknowledgementStore(root / "state")
+    store.unreported(session_id="one", candidates={"README.md": OLD})
 
-    assert store.should_prompt(session_id="one", reviews=reviews, **arguments)
-    assert not store.should_prompt(session_id="one", reviews=reviews, **arguments)
-    assert store.should_prompt(session_id="two", reviews=reviews, **arguments)
+    assert store.unreported(
+        session_id="one", candidates={"README.md": OLD, "docs/api.md": OLD}
+    ) == ("docs/api.md",)
 
 
-def test_changed_source_content_prompts_again(
-    uncommitted_repository: Path, store: AcknowledgementStore
-) -> None:
-    root = uncommitted_repository
-    assert _prompted(store, root, "src/app.py")
+def test_a_document_that_stops_being_a_candidate_is_forgotten(root: Path) -> None:
+    store = AcknowledgementStore(root / "state")
+    store.unreported(session_id="one", candidates={"README.md": OLD})
+    store.unreported(session_id="one", candidates={})
 
-    (root / "src/app.py").write_text("v2", encoding="utf-8")
+    assert store.unreported(session_id="one", candidates={"README.md": OLD}) == (
+        "README.md",
+    )
 
-    assert _prompted(store, root, "src/app.py")
+
+def test_nothing_to_report_writes_no_state(root: Path) -> None:
+    store = AcknowledgementStore(root / "state")
+
+    assert store.unreported(session_id="one", candidates={}) == ()
+    assert not (root / "state").exists()
 
 
 def test_the_hook_switch_round_trips(root: Path) -> None:
@@ -69,37 +74,30 @@ def test_the_hook_switch_round_trips(root: Path) -> None:
     "value",
     [
         [],
-        {"version": True, "paths": {}},
-        {"version": 1, "paths": {"../outside": "missing"}},
-        {"version": 1, "paths": {"/outside": "missing"}},
-        {"version": 1, "paths": {".git/config": "missing"}},
-        {"version": 1, "paths": {"src/app.py": None}},
-        {"version": 1, "paths": {"src/app.py": "invalid fingerprint"}},
+        {"version": True, "documents": {}},
+        {"version": 1, "paths": {"src/app.py": "missing"}},
+        {"version": 2, "documents": []},
+        {"version": 2, "documents": {"README.md": None}},
+        {"version": 2, "documents": {"README.md": "not a fingerprint"}},
     ],
 )
-def test_baseline_rejects_invalid_state(
-    uncommitted_repository: Path, value: object
-) -> None:
-    directory = uncommitted_repository / "state"
+def test_baseline_rejects_invalid_state(root: Path, value: object) -> None:
+    directory = root / "state"
     store = BaselineStore(directory)
-    store.capture(session_id="one", root=uncommitted_repository)
+    store.capture(session_id="one", fingerprints={"README.md": OLD})
     path = next((directory / "baselines").glob("*.json"))
     path.write_text(json.dumps(value), encoding="utf-8")
+
     assert store.load("one") is None
 
 
-def test_baseline_contains_fingerprints_and_uses_safe_session_names(
-    uncommitted_repository: Path,
-) -> None:
-    directory = uncommitted_repository / "state"
+def test_baseline_round_trips_and_uses_safe_session_names(root: Path) -> None:
+    directory = root / "state"
     store = BaselineStore(directory)
     session_id = "../outside/session"
-    source = uncommitted_repository / "src/app.py"
-    source.write_text("private source text", encoding="utf-8")
-    store.capture(session_id=session_id, root=uncommitted_repository)
-    baseline = store.load(session_id)
-    assert baseline is not None
-    assert baseline["src/app.py"].startswith("file:")
+
+    store.capture(session_id=session_id, fingerprints={"README.md": OLD})
+
+    assert store.load(session_id) == {"README.md": OLD}
     path = next((directory / "baselines").glob("*.json"))
     assert len(path.stem) == 64
-    assert "private source text" not in path.read_text(encoding="utf-8")

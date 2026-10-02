@@ -15,9 +15,8 @@ step. Keep tool upgrades deliberate and fix new findings in the same change.
 
 ## Code boundaries
 
-- Keep `evaluate()`, `fingerprint()`, and `Config.resolve()` free of Git, file
-  access, hook input, and command output. `cli.py` passes in repository paths
-  and object ids.
+- Keep `match.py` and `Config.resolve()` free of Git, file access, hook input,
+  and command output. `cli.py` passes in repository paths and object ids.
 - Route all Git calls through `_run_git()` and human or JSON output through
   `cli.py`.
 - Anchor source patterns to the repository root. Matching at any depth requires
