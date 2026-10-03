@@ -23,6 +23,8 @@ package = ["src/docstale/", "pyproject.toml"]
   "src/docstale/state.py",
 ]
 
+"docs/assets/agent-session.svg" = ["src/docstale/render.py"]
+
 "docs/installation.md" = [
   "pyproject.toml",
   "src/docstale/cli.py",

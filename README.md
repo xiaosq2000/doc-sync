@@ -3,11 +3,14 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-Docstale reports documents that may be out of date. You map each document to
-the source files it describes and stamp the document after you review it.
-Docstale then reports every document whose sources changed after its stamp. It
-uses a TOML file, a committed lockfile, and Git. It does not call an LLM or
-guess what a change means.
+A code change does not tell you which documents it made wrong. Docstale reports
+documents that may be out of date. You map each document to the source files it
+describes and stamp the document after you review it. Docstale then reports
+every document whose sources changed after its stamp. It uses a TOML file, a
+committed lockfile, and Git. It does not call an LLM or guess what a change
+means.
+
+![An agent renames connect() to open() in src/client.py. README.md still says connect(), so the docstale Stop hook reports README.md with the changed source. A reviewer subagent finds the Usage section affected, the agent updates README.md, and docstale stamp records the review in docstale.lock.](docs/assets/agent-session.svg)
 
 ## How it works
 
@@ -148,6 +151,17 @@ A fingerprint covers the Git object id of every file that the document's sources
 match, except the document itself. It is the same on every clone and platform.
 Reverting a source change makes the document current again.
 
+```mermaid
+stateDiagram-v2
+    direction LR
+    state "Needs review" as review
+    state "Current" as current
+    [*] --> review: never stamped
+    review --> current: docstale stamp
+    current --> review: a source changes
+    review --> current: source change reverted
+```
+
 Entries in `docstale.lock` are separated by blank lines, so stamps of different
 documents merge cleanly. When a merge leaves an entry in conflict, `check`
 reports that document and `stamp` rewrites the file.
@@ -219,17 +233,24 @@ the session.
 
 SessionStart saves a baseline with the fingerprint of every document. At Stop,
 the hook asks for a review of each document whose fingerprint differs from both
-the lock and the baseline. A document that already needed review when the
-session started is left to `docstale check`, so a session that only reads files
-or answers questions gets no reminder. The reminder lists every source that
-changed since the document was stamped, and stamping the document clears it.
-The baseline is preserved when the same session resumes or compacts.
+the lock and the baseline:
+
+| At SessionStart | During the session | Reminder at Stop |
+| --- | --- | --- |
+| Current | A source changes | Yes |
+| Needs review | No source changes | No, `docstale check` still lists it |
+| Needs review | A source changes again | Yes |
+| Either | The sources return to their starting or stamped state | No |
+
+A session that only reads files or answers questions therefore gets no reminder.
+The reminder lists every source that changed since the document was stamped, and
+stamping the document clears it. The baseline is preserved when the same session
+resumes or compacts.
 
 Changes made by you or other tools in the same checkout during the session also
 count, and so does a configuration change that alters a document's matched
 files. Committing session edits does not hide them from the hook. Staging or
-committing existing edits alone does not trigger a reminder. Restoring the
-sources to their starting state removes the document from the reminder.
+committing existing edits alone does not trigger a reminder.
 
 If a baseline is missing, corrupt, or from an unsupported version, the hook
 saves the current fingerprints and stays silent. With only Stop configured, the
