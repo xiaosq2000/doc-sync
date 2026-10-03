@@ -12,6 +12,8 @@ package = ["src/docstale/", "pyproject.toml"]
   ".pre-commit-hooks.yaml",
 ]
 
+"docs/reference.md" = ["@package"]
+
 "AGENTS.md" = ["@package", "tests/conftest.py"]
 
 "CONTRIBUTING.md" = ["@package", ".github/workflows/"]

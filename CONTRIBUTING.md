@@ -61,7 +61,8 @@ Internal Python classes are implementation details and are not a public API.
 ## Contracts
 
 Changes to configuration behavior, JSON output, exit codes, or the Stop hook
-must include contract tests and matching README updates.
+must include contract tests and matching updates to the README or
+`docs/reference.md`.
 
 The stable exit codes are:
 
