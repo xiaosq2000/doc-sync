@@ -12,7 +12,7 @@ Semantic Versioning after its first stable release.
   start a repository on the lock.
 - A `docstale` pre-commit hook runs `docstale check`.
 - The hook reminder suggests an optional `docstale-reviewer` subagent, and the
-  README provides its Claude Code definition. The subagent only reports a
+  repository provides its Claude Code definition. The subagent only reports a
   verdict. It does not edit or stamp documents.
 - A `[sets]` table names source lists that documents include with `@name`.
 - Document keys may be globs. A glob names every matching file, including files

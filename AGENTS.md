@@ -29,8 +29,9 @@ Stamp a document only after reading it against the changed sources.
 
 ## Hook invariants
 
-The [README hook section](README.md#add-the-agent-hook) defines session behavior,
-error handling, and setup.
+The [hook reference](docs/reference.md#agent-hook) defines session behavior and
+error handling, and the [README](README.md#remind-your-coding-agent) defines
+setup.
 
 - Return immediately when `stop_hook_active` is true, before accessing Git,
   configuration, or state.
@@ -43,5 +44,6 @@ error handling, and setup.
 ## Contract changes
 
 Changes to configuration behavior, JSON output, exit codes, or hooks must include
-contract tests and matching README updates. Mark tests that require POSIX
-filesystem behavior with `@pytest.mark.posix_only` so they skip on Windows.
+contract tests and matching updates to the README or `docs/reference.md`. Mark
+tests that require POSIX filesystem behavior with `@pytest.mark.posix_only` so
+they skip on Windows.
