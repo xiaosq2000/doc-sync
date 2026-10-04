@@ -39,7 +39,44 @@ pipx upgrade docstale
 ```
 
 Docstale does not edit agent configuration. A command change therefore requires
-you to update the Stop entry in `.claude/settings.json` or `.codex/hooks.json`.
+you to update the hook entries in `.claude/settings.json` or `.codex/hooks.json`.
+For pi, update `DOCSTALE_EXECUTABLE` if the executable path changes.
+
+## Pi extension
+
+Install the Python command first. Then install the extension with pi 1.0.2 or
+newer:
+
+```bash
+pi install git:github.com/xiaosq2000/docstale
+```
+
+Add `--local` for a project install. Review the extension before granting project
+trust. Project installations load only after pi trusts the project. Automated
+runs can use `--approve` to grant trust for that invocation.
+
+The Pi package contains only the adapter. It does not install Python, Git, or
+the `docstale` command. You do not need an npm install or compilation step to
+use the extension.
+
+For a one-session test from a source checkout, run:
+
+```bash
+pi --extension ./.pi/extensions/docstale.ts
+```
+
+A trusted source checkout already loads `.pi/extensions/docstale.ts`
+automatically. Use the development executable as described in
+[Contributing](../CONTRIBUTING.md#documents).
+
+To update an unpinned extension install, run:
+
+```bash
+pi update git:github.com/xiaosq2000/docstale
+```
+
+Update the Python command separately. Add `@<tag-or-commit>` to the Git package
+source if you need a pinned extension revision.
 
 ## Move from doc-sync
 
@@ -60,8 +97,15 @@ delete that directory.
 
 ## Remove docstale
 
-First, remove the `docstale hook` entry from every agent configuration where
-you added it. Then remove the command:
+First, remove the `docstale hook` entries from each Claude Code or Codex
+configuration where you added them. For pi, remove the extension:
+
+```bash
+pi remove git:github.com/xiaosq2000/docstale
+```
+
+Add `--local` if you installed it for one project. If you copied the extension,
+remove that file instead. Then remove the Python command:
 
 ```bash
 uv tool uninstall docstale
@@ -80,3 +124,8 @@ yourself if you no longer need them.
   new shell.
 - If docstale cannot find a repository, run it inside a Git worktree.
 - If a Codex hook does not run, open `/hooks` and check its trust state.
+- If a project-local pi extension does not load, check project trust with
+  `/trust`.
+- If pi cannot start docstale, check its `PATH` or set `DOCSTALE_EXECUTABLE`
+  to the executable's full path. Do not include arguments in the value.
+- If pi reports an unsupported extension event, upgrade pi to 1.0.2 or newer.

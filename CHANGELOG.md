@@ -7,6 +7,10 @@ Semantic Versioning after its first stable release.
 
 ### Added
 
+- A pi extension reuses `docstale hook` for session baselines and review
+  reminders. Install it with `pi install git:github.com/xiaosq2000/docstale`
+  after installing the Python command. It requests at most one review
+  continuation per request and supports pi's non-interactive modes.
 - `docstale.lock` records a fingerprint of each document's sources at its last
   review, and `docstale stamp` writes it. Run `docstale stamp --all` once to
   start a repository on the lock.

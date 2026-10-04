@@ -13,6 +13,10 @@ Docstale requires Python 3.11 or newer, Git, and
 uv sync --all-groups
 ```
 
+The pi adapter tests also require Node.js 22.19 or newer and npm. They use
+Node's built-in test runner and TypeScript support. They need no `npm install`
+and make no model calls.
+
 Run all checks before opening a pull request:
 
 ```bash
@@ -20,6 +24,7 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 uv run ty check
+npm test
 uv run docstale check
 ```
 
@@ -36,6 +41,24 @@ stamp it with `uv run docstale stamp <document>`. The agent hooks in `.claude/`
 and `.codex/` run the development build from `.venv`, so run `uv sync
 --all-groups` before starting an agent.
 
+Pi loads `.pi/extensions/docstale.ts` after project trust. From the repository
+root on POSIX systems, select the development executable before starting pi:
+
+```bash
+DOCSTALE_EXECUTABLE="$PWD/.venv/bin/docstale" pi
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:DOCSTALE_EXECUTABLE = "$PWD\.venv\Scripts\docstale.exe"
+pi
+```
+
+The extension otherwise uses `docstale` from `PATH`. `npm test` uses the
+checkout's `.venv` executable by default. Set `DOCSTALE_EXECUTABLE` to test
+another installation.
+
 ## Architecture
 
 Docstale has one job. It reports documents whose sources changed since their
@@ -49,10 +72,14 @@ fingerprints in `docstale.lock`.
 - `lock.py` reads and writes `docstale.lock`.
 - `render.py` writes the review report and the hook reminder.
 - `git.py` discovers the repository, changed paths, and Git object ids.
-- `hook.py` parses the shared Claude Code and Codex Stop protocol.
+- `hook.py` parses the shared SessionStart and Stop protocol.
 - `state.py` stores session fingerprints, reminder state, and the local disable
   marker.
 - `cli.py` implements `check`, `stamp`, `hook`, `disable`, and `enable`.
+- `.pi/extensions/docstale.ts` translates pi lifecycle events into that hook
+  protocol. Python still owns fingerprints, baseline storage, and review text.
+- `package.json` exposes the adapter as a Git-installable Pi package.
+- `tests/pi/` tests the adapter and the real CLI in temporary Git repositories.
 
 Keep `match.py` and `Config.resolve()` free of Git, file access, hook input,
 and command output.
@@ -60,7 +87,7 @@ Internal Python classes are implementation details and are not a public API.
 
 ## Contracts
 
-Changes to configuration behavior, JSON output, exit codes, or the Stop hook
+Changes to configuration behavior, JSON output, exit codes, or agent hooks
 must include contract tests and matching updates to the README or
 `docs/reference.md`.
 

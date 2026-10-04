@@ -4,21 +4,24 @@
 
 [sets]
 package = ["src/docstale/", "pyproject.toml"]
+pi = [".pi/extensions/", "package.json"]
 
 [documents]
 "README.md" = [
   "@package",
+  "@pi",
   ".claude/agents/docstale-reviewer.md",
   ".pre-commit-hooks.yaml",
 ]
 
-"docs/reference.md" = ["@package"]
+"docs/reference.md" = ["@package", "@pi"]
 
-"AGENTS.md" = ["@package", "tests/conftest.py"]
+"AGENTS.md" = ["@package", "@pi", "tests/conftest.py"]
 
-"CONTRIBUTING.md" = ["@package", ".github/workflows/"]
+"CONTRIBUTING.md" = ["@package", "@pi", ".github/workflows/", "tests/pi/"]
 
 "SECURITY.md" = [
+  "@pi",
   "src/docstale/fsutil.py",
   "src/docstale/git.py",
   "src/docstale/lock.py",
@@ -28,6 +31,7 @@ package = ["src/docstale/", "pyproject.toml"]
 "docs/assets/agent-session.svg" = ["src/docstale/render.py"]
 
 "docs/installation.md" = [
+  "@pi",
   "pyproject.toml",
   "src/docstale/cli.py",
   "src/docstale/config.py",

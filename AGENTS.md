@@ -35,6 +35,10 @@ setup.
 
 - Return immediately when `stop_hook_active` is true, before accessing Git,
   configuration, or state.
+- Keep pi's staleness decisions and review text in Python. The adapter only
+  translates lifecycle events and the hook protocol.
+- Preserve earlier pi boundary entries. Request at most one review continuation
+  per settled run. Never restart aborted or failed work.
 - Keep session baselines separate from acknowledgements. Resume, compaction,
   and clearing acknowledgements must preserve the baseline.
 - Store hook state under `git rev-parse --git-path docstale` so linked worktrees

@@ -72,9 +72,11 @@ Editing a document does not count as a review. Only `docstale stamp` clears it.
 
 ## Remind your coding agent
 
-Claude Code and Codex can run docstale when a session starts and when the agent
-finishes a turn. If the agent changed sources of a document, docstale asks it to
-review that document before it stops.
+Claude Code, Codex, and pi can run docstale when a session starts and before the
+agent finishes a request. If sources change during the session, docstale asks the
+agent to review the affected documents.
+
+### Claude Code and Codex
 
 1. Add these hooks to `.claude/settings.json` or `.codex/hooks.json`. Keep the
    settings that are already in the file:
@@ -120,8 +122,31 @@ review that document before it stops.
    curl -o .claude/agents/docstale-reviewer.md https://raw.githubusercontent.com/xiaosq2000/docstale/main/.claude/agents/docstale-reviewer.md
    ```
 
-To pause the hook in one checkout, run `docstale disable`. Run `docstale enable`
-to turn it back on.
+### Pi
+
+Pi uses an extension instead of JSON hooks. You need pi 1.0.2 or newer and the
+`docstale` command from the quick start.
+
+1. Install the extension:
+
+   ```bash
+   pi install git:github.com/xiaosq2000/docstale
+   ```
+
+   Add `--local` to install it for one project instead of every project.
+
+2. Start a new pi session. Alternatively, run `/reload` in the current session.
+
+The extension saves a session baseline and checks before pi finishes a request.
+If a document needs review, it sends the reminder to the model and requests one
+continuation. It does not start a reviewer subagent or stamp documents.
+
+The extension runs `docstale` from `PATH`. If needed, set `DOCSTALE_EXECUTABLE`
+to the executable's full path before starting pi. The value is one executable
+path, not a shell command.
+
+To pause any agent hook in one checkout, run `docstale disable`. Run
+`docstale enable` to enable the hooks again. Manual checks still run.
 
 ## Block commits and pull requests
 

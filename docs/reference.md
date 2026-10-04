@@ -177,6 +177,48 @@ To switch the hook off or on for the current checkout only, run
 still run while the hook is disabled. The switch is stored beside the hook state
 under Git metadata.
 
+### Pi adapter
+
+The pi extension translates lifecycle events into the same `docstale hook`
+protocol. It does not implement a separate check.
+
+| Pi event | Hook action |
+| --- | --- |
+| `session_start` | Send `SessionStart` with pi's current session ID and working directory. |
+| `agent_before_settle` | Send `Stop` after the request's automatic retries and queued work finish. |
+| A `block` response | Append the reason as a visible custom message. Request one model continuation. |
+| `agent_settled` | Allow a reminder in the next request. |
+| `session_shutdown` | Cancel any pending hook process. |
+
+The adapter prefixes session IDs with `pi:` to separate pi state from other
+agents' state. Resume and reload use the existing session ID and preserve its
+baseline. Compaction and tree navigation do not capture another baseline. New
+sessions and forks use their own session IDs and baselines.
+
+The adapter skips the check during its review continuation. It does not check or
+request a continuation when pi reports an aborted or failed run. If another
+extension already requests a continuation, docstale waits for the next settlement
+boundary. The adapter preserves entries that earlier extensions supplied.
+
+The extension works in interactive, RPC, JSON, and print modes. Startup failures
+produce a warning, not a model request. Interactive and RPC sessions receive UI
+notifications. Print and JSON sessions receive diagnostics on stderr, never
+stdout. Stop failures produce one continuation message, as they do in the shared
+hook protocol.
+
+The adapter runs `docstale hook` without a shell. Each invocation has a
+30-second timeout and a 1 MiB limit for each output stream. A missing executable,
+failed process, timeout, output overflow, or malformed response follows the same
+startup and Stop error rules.
+
+The default executable is `docstale` from `PATH`. Set `DOCSTALE_EXECUTABLE` to
+an executable path to use another installation. The adapter always passes
+`hook` as its only argument. It does not accept a shell command or an argument
+list in this variable.
+
+See the [README](../README.md#pi) for setup. The extension targets pi 1.0.2 or
+newer, which provides the actionable `agent_before_settle` event.
+
 ## Reviewer subagent
 
 The hook reminder suggests a `docstale-reviewer` subagent when the agent has

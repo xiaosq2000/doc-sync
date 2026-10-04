@@ -1,4 +1,4 @@
-"""The session hook protocol shared by Claude Code and Codex."""
+"""The SessionStart and Stop protocol used by agents and their adapters."""
 
 from __future__ import annotations
 

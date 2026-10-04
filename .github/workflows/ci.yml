@@ -31,6 +31,28 @@ jobs:
       - run: uv sync --locked --all-groups
       - run: uv run pytest --cov --cov-report=term-missing
 
+  pi:
+    name: Pi adapter on Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["22.19.0", "24"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - run: uv sync --locked --all-groups
+      # Node supplies the test runner and TypeScript support. No npm install.
+      - run: npm test
+
   quality:
     runs-on: ubuntu-latest
     steps:

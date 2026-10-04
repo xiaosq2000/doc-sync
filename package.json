@@ -1,0 +1,21 @@
+{
+  "name": "docstale-pi",
+  "version": "0.1.0-alpha.2",
+  "private": true,
+  "description": "Remind pi to review documents after their sources change",
+  "license": "MIT",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./.pi/extensions/docstale.ts"]
+  },
+  "scripts": {
+    "test": "node --test tests/pi/extension.test.ts tests/pi/integration.test.ts"
+  }
+}
