@@ -42,6 +42,9 @@ Docstale does not edit agent configuration. A command change therefore requires
 you to update the hook entries in `.claude/settings.json` or `.codex/hooks.json`.
 For pi, update `DOCSTALE_EXECUTABLE` if the executable path changes.
 
+Update copied reviewer definitions separately. Preserve your custom `model`
+and, for Codex, `model_reasoning_effort` values when replacing a definition.
+
 ## Pi extension
 
 Install the Python command first. Then install the extension with pi 1.0.2 or
@@ -98,7 +101,11 @@ delete that directory.
 ## Remove docstale
 
 First, remove the `docstale hook` entries from each Claude Code or Codex
-configuration where you added them. For pi, remove the extension:
+configuration where you added them. If you installed the optional reviewer,
+remove `.claude/agents/docstale-reviewer.md` or
+`.codex/agents/docstale-reviewer.toml` as applicable.
+
+For pi, remove the extension:
 
 ```bash
 pi remove git:github.com/xiaosq2000/docstale
@@ -124,6 +131,9 @@ yourself if you no longer need them.
   new shell.
 - If docstale cannot find a repository, run it inside a Git worktree.
 - If a Codex hook does not run, open `/hooks` and check its trust state.
+- If Codex cannot load the reviewer, check that your version supports native
+  `.codex/agents/*.toml` files. Check the model and reasoning effort in the
+  definition, then restart Codex.
 - If a project-local pi extension does not load, check project trust with
   `/trust`.
 - If pi cannot start docstale, check its `PATH` or set `DOCSTALE_EXECUTABLE`

@@ -113,14 +113,35 @@ agent to review the affected documents.
 
 2. In Codex, open `/hooks` and trust the new entry.
 
-3. Optional, for Claude Code: add the reviewer subagent. It runs on a small
-   model, reads the diff and the document, and answers `unaffected`,
-   `affected`, or `unsure`. It never edits or stamps files.
+3. Optional: add the reviewer subagent for your coding agent. It reads the diff
+   and the document, and answers `unaffected`, `affected`, or `unsure`. It never
+   edits or stamps files.
+
+   For Claude Code:
 
    ```bash
    mkdir -p .claude/agents
    curl -o .claude/agents/docstale-reviewer.md https://raw.githubusercontent.com/xiaosq2000/docstale/main/.claude/agents/docstale-reviewer.md
    ```
+
+   For Codex, use a version that supports native `.codex/agents/*.toml` files:
+
+   ```bash
+   mkdir -p .codex/agents
+   curl -o .codex/agents/docstale-reviewer.toml https://raw.githubusercontent.com/xiaosq2000/docstale/main/.codex/agents/docstale-reviewer.toml
+   ```
+
+   To choose another model, edit `model` in the reviewer file. The Claude Code
+   default is `haiku`. The Codex defaults are:
+
+   ```toml
+   model = "gpt-6-luna"
+   model_reasoning_effort = "high"
+   ```
+
+   In Codex, set both values to ones your model and account support. Restart
+   Codex after adding or changing the definition. These settings affect only
+   the reviewer, not the main agent or other subagents.
 
 ### Pi
 
