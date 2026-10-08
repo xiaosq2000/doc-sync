@@ -5,16 +5,20 @@
 [sets]
 package = ["src/docstale/", "pyproject.toml"]
 pi = [".pi/extensions/", "package.json"]
+reviewers = [
+  ".claude/agents/docstale-reviewer.md",
+  ".codex/agents/docstale-reviewer.toml",
+]
 
 [documents]
 "README.md" = [
   "@package",
   "@pi",
-  ".claude/agents/docstale-reviewer.md",
+  "@reviewers",
   ".pre-commit-hooks.yaml",
 ]
 
-"docs/reference.md" = ["@package", "@pi"]
+"docs/reference.md" = ["@package", "@pi", "@reviewers"]
 
 "AGENTS.md" = ["@package", "@pi", "tests/conftest.py"]
 
@@ -32,6 +36,7 @@ pi = [".pi/extensions/", "package.json"]
 
 "docs/installation.md" = [
   "@pi",
+  "@reviewers",
   "pyproject.toml",
   "src/docstale/cli.py",
   "src/docstale/config.py",

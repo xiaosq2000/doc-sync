@@ -231,6 +231,34 @@ The main agent stamps `unaffected` documents, updates and then stamps
 `affected` ones, and asks you about `unsure` ones. A small model keeps each
 review cheap, and every stamp stays visible in the `docstale.lock` diff.
 
+### Reviewer model
+
+Docstale does not select or run models. Configure the reviewer in the coding
+agent's native definition:
+
+| Agent | Project file | Shipped model | Reasoning effort |
+| --- | --- | --- | --- |
+| Claude Code | `.claude/agents/docstale-reviewer.md` | `haiku` | Host default |
+| Codex | `.codex/agents/docstale-reviewer.toml` | `gpt-6-luna` | `high` |
+
+Edit `model` in the reviewer file to choose another model. For Codex, also set
+`model_reasoning_effort` to a value the selected model supports. The model must
+be available to your account. Restart Codex after changing the definition.
+
+Codex applies these values to the named reviewer, not the main agent or other
+subagents. Omitted settings follow Codex's normal subagent inheritance rules,
+which can retain the parent's reasoning effort even when the reviewer selects
+another model. Set both values explicitly to avoid that mismatch. See
+[Codex's subagent guide](https://developers.openai.com/codex/subagents#custom-agents)
+for configuration precedence and native agent-file support.
+
+The Codex definition requests a read-only sandbox. Runtime permission overrides
+can supersede that default. The review instructions still prohibit edits and
+stamps. Pi does not start a reviewer subagent, so these files do not change pi's
+model selection.
+
+See the [README](../README.md#claude-code-and-codex) for reviewer installation.
+
 ## Pre-commit and CI
 
 The `docstale` pre-commit hook runs `docstale check`, which blocks a commit
